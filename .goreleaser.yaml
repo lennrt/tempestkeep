@@ -1,0 +1,44 @@
+# GoReleaser builds qualification snapshots. Publication is disabled.
+# Builds use pure Go for Linux, macOS, and Windows on amd64 and arm64.
+version: 2
+
+builds:
+  - id: tempest-mcp
+    main: ./cmd/tempest-mcp
+    binary: tempest-mcp
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X github.com/lennrt/tempestkeep/internal/version.version={{.Version}}
+  - id: tempest
+    main: ./cmd/tempest
+    binary: tempest
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X github.com/lennrt/tempestkeep/internal/version.version={{.Version}}
+
+archives:
+  - id: default
+    ids: [tempest-mcp, tempest]
+    name_template: "tempestkeep_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, NOTICE.md, README.md, docs/tempestkeep-hero.jpg]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]
+
+release:
+  disable: true

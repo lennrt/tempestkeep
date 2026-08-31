@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "tempest": {
+      "command": "tempest-mcp",
+      "args": [],
+      "env": {
+        "TEMPEST_TOKEN": "${TEMPEST_TOKEN}",
+        "TEMPEST_DB": "${TEMPEST_DB}"
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+# Secrets
+.env
+
+# Local data & backups (rebuildable from the WeatherFlow REST API)
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+/backups/
+/data/
+
+# Go build output (binaries live in cmd/*; build them locally)
+/tempest-mcp
+/tempest
+*.exe
+/bin/
+/coverage.out
+
+# OS
+.DS_Store
+Thumbs.db

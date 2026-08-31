@@ -1,0 +1,21 @@
+{
+  "name": "tempestkeep",
+  "owner": {
+    "name": "Lennart Rudolph",
+    "url": "https://github.com/lennrt"
+  },
+  "metadata": {
+    "description": "TempestKeep MCP plugin for live and archived weather data",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "tempestkeep",
+      "source": "./plugin",
+      "description": "MCP integration for live and archived Tempest data",
+      "author": { "name": "Lennart Rudolph" },
+      "license": "MIT",
+      "keywords": ["weather", "mcp", "tempest", "weatherflow", "sqlite", "analytics"]
+    }
+  ]
+}

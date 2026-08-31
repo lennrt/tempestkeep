@@ -1,0 +1,22 @@
+#!/bin/sh
+# TempestKeep pre-commit hook: verify that staged Go files are gofmt-clean, then
+# run go vet. The hook never edits or stages files on the contributor's behalf.
+set -e
+
+# Staged Go files (added / copied / modified), NUL-delimited for unusual names.
+fmtneeded=$(git diff --cached --name-only --diff-filter=ACM -z -- '*.go' | xargs -0 gofmt -l --)
+if [ -n "$fmtneeded" ]; then
+  echo "pre-commit: these files need gofmt:" >&2
+  printf '%s\n' "$fmtneeded" >&2
+  exit 1
+fi
+
+if ! go vet ./...; then
+  echo "pre-commit: 'go vet' failed; fix the issues above and re-commit." >&2
+  exit 1
+fi
+
+if ! go run ./tools/docscheck -root .; then
+  echo "pre-commit: documentation checks failed; fix the issues above." >&2
+  exit 1
+fi

@@ -1,0 +1,28 @@
+<svg width="528" height="208" viewBox="0 0 528 208" role="img" aria-labelledby="title desc" xmlns="http://www.w3.org/2000/svg" xml:space="preserve">
+  <title id="title">TempestKeep live terminal dashboard</title>
+  <desc id="desc">A terminal card with current weather, sensor readings, and a five-day forecast.</desc>
+  <style>
+    text { font: 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-ligatures: none; dominant-baseline: central; white-space: pre; fill: #d8dee9; }
+    .border, .sun { fill: #ffd23f; }
+    .hot { fill: #ff7b72; font-weight: 700; }
+    .bold { font-weight: 700; }
+    .muted { fill: #7f8c9f; }
+    .cool { fill: #7fd3e8; }
+  </style>
+  <rect width="528" height="208" rx="8" fill="#0d1117"/>
+  <g transform="translate(8 0)">
+    <text x="0" y="8"><tspan class="border">╭───────────────────────────────────────────────────────────╮</tspan></text>
+    <text x="0" y="24"><tspan class="border">│  </tspan><tspan class="bold">Tempest Ridge</tspan>                 <tspan class="muted">Sat 11:41 · live · 0s ago</tspan><tspan class="border">  │</tspan></text>
+    <text x="0" y="40"><tspan class="border">│  </tspan><tspan class="muted">───────────────────────────────────────────────────────</tspan><tspan class="border">  │</tspan></text>
+    <text x="0" y="56"><tspan class="border">│      </tspan><tspan class="sun">\ | /</tspan>      <tspan class="sun bold">Sunny</tspan>                                     <tspan class="border">│</tspan></text>
+    <text x="0" y="72"><tspan class="border">│     </tspan><tspan class="sun">.-----.</tspan>     <tspan class="hot">86°F</tspan>  <tspan class="muted">feels 88°F</tspan>                          <tspan class="border">│</tspan></text>
+    <text x="0" y="88"><tspan class="border">│   </tspan><tspan class="sun">--(     )--</tspan>   <tspan class="bold">↗ SW  5 mph</tspan>  <tspan class="muted">·</tspan>  <tspan class="bold">gust 9</tspan>                    <tspan class="border">│</tspan></text>
+    <text x="0" y="104"><tspan class="border">│     </tspan><tspan class="sun">'-----'</tspan>     41% RH  <tspan class="muted">·</tspan>  dew 65°F  <tspan class="muted">·</tspan>  29.85 inHg        <tspan class="border">│</tspan></text>
+    <text x="0" y="120"><tspan class="border">│      </tspan><tspan class="sun">/ | \</tspan>      UV 9  <tspan class="muted">·</tspan>  899 W/m²  <tspan class="muted">·</tspan>  rain 0.00 in        <tspan class="border">│</tspan></text>
+    <text x="0" y="136"><tspan class="border">│  </tspan><tspan class="muted">───────────────────────────────────────────────────────</tspan><tspan class="border">  │</tspan></text>
+    <text x="0" y="152"><tspan class="border">│     </tspan><tspan class="muted">Today       Sun        Mon        Tue        Wed</tspan><tspan class="border">      │</tspan></text>
+    <text x="0" y="168"><tspan class="border">│       </tspan><tspan class="sun">☀          ↯          ☀          ☀          ☼</tspan><tspan class="border">       │</tspan></text>
+    <text x="0" y="184"><tspan class="border">│    </tspan><tspan class="hot">90°</tspan>/<tspan class="cool">61°</tspan>    <tspan class="hot">96°</tspan>/<tspan class="cool">64°</tspan>    <tspan class="hot">94°</tspan>/<tspan class="cool">63°</tspan>    <tspan class="hot">92°</tspan>/<tspan class="cool">61°</tspan>    <tspan class="hot">90°</tspan>/<tspan class="cool">64°</tspan><tspan class="border">    │</tspan></text>
+    <text x="0" y="200"><tspan class="border">╰───────────────────────────────────────────────────────────╯</tspan></text>
+  </g>
+</svg>

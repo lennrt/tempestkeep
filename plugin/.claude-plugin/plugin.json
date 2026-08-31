@@ -1,0 +1,15 @@
+{
+  "name": "tempestkeep",
+  "displayName": "TempestKeep",
+  "version": "0.1.0",
+  "description": "MCP integration for live and archived Tempest data.",
+  "author": {
+    "name": "Lennart Rudolph",
+    "url": "https://github.com/lennrt/tempestkeep"
+  },
+  "homepage": "https://github.com/lennrt/tempestkeep",
+  "repository": "https://github.com/lennrt/tempestkeep",
+  "license": "MIT",
+  "keywords": ["weather", "mcp", "tempest", "weatherflow", "sqlite", "analytics"],
+  "mcpServers": "./.mcp.json"
+}

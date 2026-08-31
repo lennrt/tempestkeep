@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/lennrt/tempestkeep/security/advisories/new
+    about: Report vulnerabilities and suspected secret exposure privately.
+  - name: Support guide
+    url: https://github.com/lennrt/tempestkeep/blob/main/SUPPORT.md
+    about: Read the support scope and required diagnostic information.

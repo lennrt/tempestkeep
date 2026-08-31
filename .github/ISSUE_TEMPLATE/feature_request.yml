@@ -1,0 +1,47 @@
+name: Feature request
+description: Propose a focused TempestKeep capability or simplification.
+title: "feature: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user or operator problem without including station data.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed result
+      description: State the behavior, bounds, ownership, and failure behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: List simpler workflows or existing commands that you considered.
+    validations:
+      required: true
+  - type: dropdown
+    id: boundary
+    attributes:
+      label: Main compatibility boundary
+      options:
+        - No public boundary
+        - Go API
+        - CLI or configuration
+        - MCP or JSON
+        - Archive storage
+        - Security or privacy
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: >-
+            This request contains no credential, station data, archive, export,
+            or raw API response.
+          required: true

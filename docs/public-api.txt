@@ -1,0 +1,634 @@
+## pkg/tempest/api
+
+package api // import "github.com/lennrt/tempestkeep/pkg/tempest/api"
+CONSTANTS
+const MaxDeviceWindow = 5 * 24 * time.Hour
+VARIABLES
+var (
+	ErrInvalidArgument   = errors.New("invalid argument")
+	ErrUnauthorized      = errors.New("unauthorized")
+	ErrNoDevice          = errors.New("no Tempest device")
+	ErrNoObservation     = errors.New("no observation")
+	ErrResponseTooLarge  = errors.New("response too large")
+	ErrMalformedResponse = errors.New("malformed response")
+	ErrTransport         = errors.New("HTTP transport failure")
+)
+TYPES
+type Client struct {
+	// Has unexported fields.
+}
+func New(token string, options ...Option) (*Client, error)
+func (c *Client) BetterForecast(ctx context.Context, stationID int) (*Forecast, error)
+func (c *Client) DeviceObservations(ctx context.Context, deviceID int, start, end int64) ([]model.DeviceObs, error)
+func (c *Client) FindTempestDevice(ctx context.Context) (*Station, int, error)
+func (c *Client) LatestStationObs(ctx context.Context, stationID int) (*StationObs, error)
+func (c *Client) Stations(ctx context.Context) ([]Station, error)
+type DailyForecast struct {
+	DayStartLocal     int64    `json:"day_start_local"`
+	Conditions        string   `json:"conditions"`
+	Icon              string   `json:"icon"`
+	Sunrise           int64    `json:"sunrise"`
+	Sunset            int64    `json:"sunset"`
+	AirTempHigh       *float64 `json:"air_temp_high"`
+	AirTempLow        *float64 `json:"air_temp_low"`
+	PrecipProbability *int     `json:"precip_probability"`
+	PrecipType        string   `json:"precip_type"`
+}
+type Device struct {
+	DeviceID     int    `json:"device_id"`
+	DeviceType   string `json:"device_type"`
+	SerialNumber string `json:"serial_number"`
+}
+type Forecast struct {
+	CurrentConditions ForecastCurrent `json:"current_conditions"`
+	Forecast          struct {
+		Daily  []DailyForecast  `json:"daily"`
+		Hourly []HourlyForecast `json:"hourly"`
+	} `json:"forecast"`
+}
+type ForecastCurrent struct {
+	Time             int64    `json:"time"`
+	Conditions       string   `json:"conditions"`
+	Icon             string   `json:"icon"`
+	AirTemperature   *float64 `json:"air_temperature"`
+	FeelsLike        *float64 `json:"feels_like"`
+	RelativeHumidity *float64 `json:"relative_humidity"`
+}
+type HTTPError struct {
+	Operation  string
+	StatusCode int
+	Retryable  bool
+}
+func (e *HTTPError) Error() string
+type HourlyForecast struct {
+	Time              int64    `json:"time"`
+	Conditions        string   `json:"conditions"`
+	Icon              string   `json:"icon"`
+	AirTemperature    *float64 `json:"air_temperature"`
+	FeelsLike         *float64 `json:"feels_like"`
+	RelativeHumidity  *float64 `json:"relative_humidity"`
+	PrecipProbability *int     `json:"precip_probability"`
+	WindAvg           *float64 `json:"wind_avg"`
+	WindGust          *float64 `json:"wind_gust"`
+	WindDirection     *float64 `json:"wind_direction"`
+	UV                *float64 `json:"uv"`
+}
+type Option func(*clientConfig) error
+func WithBaseURL(raw string) Option
+func WithCacheTTL(ttl time.Duration) Option
+func WithHTTPClient(client *http.Client) Option
+func WithRequestTimeout(timeout time.Duration) Option
+func WithRetryPolicy(policy RetryPolicy) Option
+type RetryPolicy struct {
+	MaxAttempts int
+	BaseWait    time.Duration
+	MaxWait     time.Duration
+}
+type Station struct {
+	StationID   int         `json:"station_id"`
+	Name        string      `json:"name"`
+	Latitude    float64     `json:"latitude"`
+	Longitude   float64     `json:"longitude"`
+	Timezone    string      `json:"timezone"`
+	StationMeta StationMeta `json:"station_meta"`
+	Devices     []Device    `json:"devices"`
+}
+func PickTempestDevice(stations []Station) (*Station, int, bool)
+type StationMeta struct {
+	Elevation float64 `json:"elevation"`
+}
+type StationObs struct {
+	Timestamp           int64    `json:"timestamp"`
+	AirTemperature      *float64 `json:"air_temperature"`
+	RelativeHumidity    *float64 `json:"relative_humidity"`
+	StationPressure     *float64 `json:"station_pressure"`
+	SeaLevelPressure    *float64 `json:"sea_level_pressure"`
+	WindAvg             *float64 `json:"wind_avg"`
+	WindGust            *float64 `json:"wind_gust"`
+	WindLull            *float64 `json:"wind_lull"`
+	WindDirection       *float64 `json:"wind_direction"`
+	UV                  *float64 `json:"uv"`
+	SolarRadiation      *float64 `json:"solar_radiation"`
+	Brightness          *float64 `json:"brightness"`
+	FeelsLike           *float64 `json:"feels_like"`
+	DewPoint            *float64 `json:"dew_point"`
+	PrecipAccumLocalDay *float64 `json:"precip_accum_local_day"`
+	LightningLast1hr    *int     `json:"lightning_strike_count_last_1hr"`
+	LightningLast3hr    *int     `json:"lightning_strike_count_last_3hr"`
+	LightningLastDist   *float64 `json:"lightning_strike_last_distance"`
+}
+
+## pkg/tempest/collect
+
+package collect // import "github.com/lennrt/tempestkeep/pkg/tempest/collect"
+CONSTANTS
+const (
+	// MetaBackfillCursor stores the epoch an open-ended walk-back has reached,
+	// persisted after every chunk. Without it an interrupted seed looks finished
+	// on the next run (a watermark exists, so the collector switches to forward
+	// sync) and the older history below the interruption is never fetched.
+	MetaBackfillCursor = "backfill_cursor"
+	// MetaBackfillComplete marks that a walk-back reached the start of history,
+	// so later runs skip the walk instead of re-probing empty windows.
+	MetaBackfillComplete = "backfill_complete"
+)
+const (
+	DefaultEmptyStreakStop = 3
+	MaxChunksPerOperation  = 10_000
+	MaxEmptyStreakStop     = 100
+	MaxThrottle            = time.Minute
+)
+VARIABLES
+var (
+	ErrInvalidConfig     = errors.New("invalid collector configuration")
+	ErrConcurrentUse     = errors.New("collector is already in use")
+	ErrInvalidCheckpoint = errors.New("invalid collector checkpoint")
+	ErrOperationLimit    = errors.New("collector operation limit reached")
+)
+TYPES
+type Backfiller struct {
+	// Has unexported fields.
+}
+func New(fetcher ObsFetcher, writer *store.Writer, deviceID int, options ...Option) (*Backfiller, error)
+func (b *Backfiller) BackfillBackward(ctx context.Context, before, floor int64, maxChunks int) (BackwardResult, error)
+func (b *Backfiller) BackfillRange(ctx context.Context, start, end int64, maxChunks int) (Result, error)
+func (b *Backfiller) Collect(ctx context.Context, now, backfillStart int64) (Summary, error)
+func (b *Backfiller) Sync(ctx context.Context, now int64, maxChunks int) (Result, error)
+type BackwardResult struct {
+	Fetched   int   // observations the API returned across the walk
+	RowsAdded int   // rows newly inserted
+	Chunks    int   // chunk windows actually requested
+	Reached   int64 // oldest epoch fetched to; pass as `before` to continue an unexhausted walk
+	Exhausted bool  // true once history ended (empty streak) or the floor was reached; nothing older to fetch
+}
+type ObsFetcher interface {
+	DeviceObservations(ctx context.Context, deviceID int, start, end int64) ([]model.DeviceObs, error)
+}
+type Option func(*backfillerConfig) error
+func WithChunkSeconds(seconds int64) Option
+func WithEmptyStreakStop(windows int) Option
+func WithProgress(progress ProgressFunc) Option
+func WithThrottle(delay time.Duration) Option
+type Progress struct {
+	Fetched   int
+	RowsAdded int
+	Chunks    int
+	Through   int64
+}
+type ProgressFunc func(Progress) error
+type Result struct {
+	Fetched   int   // observations the API returned across all chunks
+	RowsAdded int   // rows newly inserted (duplicates ignored, not counted)
+	Resume    int64 // epoch to resume from: end+1 when the range completed, else the failed chunk's start
+	Done      bool  // true when the whole requested range was covered
+	// NoWatermark is set only by Sync, when the device has no stored data yet, so
+	// the caller can seed the archive with a backfill before syncing.
+	NoWatermark bool
+}
+type Summary struct {
+	Mode      string // "incremental", "backfill", "seed", or "incremental+seed"
+	Fetched   int
+	RowsAdded int
+}
+
+## pkg/tempest/config
+
+package config // import "github.com/lennrt/tempestkeep/pkg/tempest/config"
+CONSTANTS
+const (
+	// DefaultDB is the working-directory archive name used when it exists.
+	DefaultDB = "tempest.sqlite"
+	// MaxDotenvBytes bounds configuration file reads and direct parsing.
+	MaxDotenvBytes = 1 << 20
+)
+VARIABLES
+var ErrConfigIO = errors.New("configuration I/O failure")
+var ErrInvalidConfig = errors.New("invalid configuration")
+FUNCTIONS
+func FirstNonEmpty(values ...string) string
+func FormatDotenvValue(value string) (string, error)
+func LoadDotenv(ctx context.Context, path string) (err error)
+func ParseDotenv(data []byte) (map[string]string, error)
+func ResolveDB(ctx context.Context, explicit string) (string, error)
+TYPES
+type APISettings struct {
+	BaseURL  string
+	CacheTTL time.Duration
+}
+func APISettingsFromEnv() (APISettings, error)
+
+## pkg/tempest/model
+
+package model // import "github.com/lennrt/tempestkeep/pkg/tempest/model"
+CONSTANTS
+const (
+	// DeviceObsFields is the exact width of a Tempest obs_st row.
+	DeviceObsFields = 18
+	// MaxEpochSeconds is 9999-12-31T23:59:59Z.
+	MaxEpochSeconds = 253402300799
+)
+VARIABLES
+var ErrInvalidObservation = errors.New("invalid observation")
+FUNCTIONS
+func ApparentTempF(tF, rh, windMph float64) float64
+func CToF(c float64) float64
+func Compass(deg float64) string
+func DewPointC(tC, rh float64) float64
+func HeatIndexF(tF, rh float64) float64
+func KmToMile(km float64) float64
+func MbToInHg(mb float64) float64
+func MmToInch(mm float64) float64
+func MpsToMph(mps float64) float64
+func WindChillF(tF, windMph float64) float64
+TYPES
+type DeviceObs struct {
+	Epoch             int64
+	WindLull          *float64
+	WindAvg           *float64
+	WindGust          *float64
+	WindDir           *float64
+	WindInterval      *float64
+	PressureMb        *float64
+	AirTempC          *float64
+	Humidity          *float64
+	IlluminanceLux    *float64
+	UV                *float64
+	SolarWm2          *float64
+	RainMm            *float64
+	PrecipType        *float64
+	StrikeDistKm      *float64
+	StrikeCount       *float64
+	BatteryV          *float64
+	ReportIntervalMin *float64
+}
+func DeviceObsFromRow(row []*float64) (DeviceObs, error)
+func (o DeviceObs) Validate() error
+type Obs struct {
+	Epoch          int64    `json:"epoch"`
+	WindLullMps    *float64 `json:"wind_lull_mps,omitempty"`
+	WindAvgMps     *float64 `json:"wind_avg_mps,omitempty"`
+	WindGustMps    *float64 `json:"wind_gust_mps,omitempty"`
+	WindDirDeg     *float64 `json:"wind_dir_deg,omitempty"`
+	PressureMb     *float64 `json:"pressure_mb,omitempty"`
+	AirTempC       *float64 `json:"air_temp_c,omitempty"`
+	HumidityPct    *float64 `json:"humidity_pct,omitempty"`
+	IlluminanceLux *float64 `json:"illuminance_lux,omitempty"`
+	UV             *float64 `json:"uv,omitempty"`
+	SolarWm2       *float64 `json:"solar_wm2,omitempty"`
+	RainMm         *float64 `json:"rain_mm,omitempty"`
+	StrikeDistKm   *float64 `json:"strike_dist_km,omitempty"`
+	StrikeCount    *float64 `json:"strike_count,omitempty"`
+	BatteryV       *float64 `json:"battery_v,omitempty"`
+}
+
+## pkg/tempest/store
+
+package store // import "github.com/lennrt/tempestkeep/pkg/tempest/store"
+CONSTANTS
+const (
+	MaxGapResults         = 1000
+	MaxQueryRows          = 1000
+	MaxQueryBytes         = 64 << 10
+	MaxQueryColumns       = 128
+	MaxQueryResultBytes   = 8 << 20
+	MaxMetadataKeyBytes   = 128
+	MaxMetadataValueBytes = 4096
+	MaxInsertBatch        = 10_000
+	MaxRangeSeconds       = int64(100 * 366 * 24 * time.Hour / time.Second)
+	MaxSeriesPoints       = 2000
+)
+VARIABLES
+var (
+	ErrInvalidArgument = errors.New("invalid argument")
+	ErrArchiveNotFound = errors.New("archive not found")
+	ErrInvalidArchive  = errors.New("invalid archive")
+	ErrDeviceMismatch  = errors.New("archive device mismatch")
+	ErrClosed          = errors.New("archive is closed")
+	ErrResultTooLarge  = errors.New("query result too large")
+	ErrArchiveIO       = errors.New("archive I/O failure")
+)
+TYPES
+type ClimateIndexParams struct {
+	FrostMaxF         float64 // frost day: daily low below this (default 32°F / 0°C)
+	IceMaxF           float64 // ice day: daily high stays below this (default 32°F)
+	SummerMinF        float64 // summer day: daily high reaches this (default 77°F / 25°C)
+	HotMinF           float64 // hot day: daily high reaches this (default 90°F)
+	TropicalNightMinF float64 // tropical night: daily low stays at or above this (default 68°F / 20°C)
+}
+func (p ClimateIndexParams) WithDefaults() ClimateIndexParams
+type ClimateIndexStat struct {
+	Period         string `json:"period,omitempty"` // YYYY; empty on the range total
+	FrostDays      int64  `json:"frost_days"`
+	IceDays        int64  `json:"ice_days"`
+	SummerDays     int64  `json:"summer_days"`
+	HotDays        int64  `json:"hot_days"`
+	TropicalNights int64  `json:"tropical_nights"`
+	Days           int64  `json:"days"`
+}
+type ComfortStats struct {
+	DaysObserved int64 `json:"days_observed"`
+	HottestFeelsLikeF   *float64 `json:"hottest_feels_like_f,omitempty"`
+	HottestFeelsLikeDay string   `json:"hottest_feels_like_day,omitempty"`
+	ColdestFeelsLikeF   *float64 `json:"coldest_feels_like_f,omitempty"`
+	ColdestFeelsLikeDay string   `json:"coldest_feels_like_day,omitempty"`
+	MuggiestDewPointF *float64 `json:"muggiest_dew_point_f,omitempty"`
+	MuggiestDay       string   `json:"muggiest_day,omitempty"`
+}
+type Coverage struct {
+	Count    int64
+	MinEpoch sql.NullInt64
+	MaxEpoch sql.NullInt64
+}
+type DayStat struct {
+	Day         string   `json:"day"` // YYYY-MM-DD, local time
+	TempMinF    *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF    *float64 `json:"temp_max_f,omitempty"`
+	TempAvgF    *float64 `json:"temp_avg_f,omitempty"`
+	RainIn      float64  `json:"rain_in"`
+	PeakGustMph *float64 `json:"peak_gust_mph,omitempty"`
+	Obs         int64    `json:"obs"`
+}
+type DegreeDayParams struct {
+	HeatingBaseF float64 // HDD base (US convention: 65°F)
+	CoolingBaseF float64 // CDD base (US convention: 65°F)
+	GrowingBaseF float64 // GDD lower base (e.g. 50°F for corn)
+	GrowingCapF  float64 // GDD upper cap on the daily high; <=0 disables capping
+}
+type DegreeDayStat struct {
+	Period string  `json:"period,omitempty"` // YYYY-MM; empty on the range total
+	HDD    float64 `json:"heating_degree_days"`
+	CDD    float64 `json:"cooling_degree_days"`
+	GDD    float64 `json:"growing_degree_days"`
+	Days   int64   `json:"days"` // days that carried both a high and a low
+}
+type Gap struct {
+	From      int64  `json:"from_epoch"`
+	To        int64  `json:"to_epoch"`
+	Seconds   int64  `json:"gap_seconds"`
+	FromLocal string `json:"from"`
+	ToLocal   string `json:"to"`
+}
+type HourStat struct {
+	Hour        int      `json:"hour"` // 0-23, local time
+	TempAvgF    *float64 `json:"temp_avg_f,omitempty"`
+	TempMinF    *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF    *float64 `json:"temp_max_f,omitempty"`
+	HumidityPct *float64 `json:"humidity_pct,omitempty"`
+	WindMph     *float64 `json:"wind_mph,omitempty"`
+	PeakGustMph *float64 `json:"peak_gust_mph,omitempty"`
+	Obs         int64    `json:"obs"`
+}
+type LightningStats struct {
+	TotalStrikes int64 `json:"total_strikes"`
+	DaysObserved int64 `json:"days_observed"`
+	StormDays    int64 `json:"storm_days"`
+	// ClosestStrikeMi is the smallest reported interval-average distance. It is
+	// not the distance to a specific bolt.
+	ClosestStrikeMi  *float64 `json:"closest_strike_mi,omitempty"`
+	ClosestStrikeDay string   `json:"closest_strike_day,omitempty"`
+	BusiestDay        string `json:"busiest_day,omitempty"`
+	BusiestDayStrikes int64  `json:"busiest_day_strikes,omitempty"`
+	FirstStormDay string `json:"first_storm_day,omitempty"`
+	LastStormDay  string `json:"last_storm_day,omitempty"`
+	LongestStormFreeDays int64  `json:"longest_storm_free_days"`
+	StormFreeSpellStart  string `json:"storm_free_spell_start,omitempty"`
+	StormFreeSpellEnd    string `json:"storm_free_spell_end,omitempty"`
+}
+type MonthNormal struct {
+	Month        int      `json:"month"`      // 1-12
+	MonthName    string   `json:"month_name"` // January ... December
+	Years        int64    `json:"years"`      // years that contributed a value
+	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
+	TempMinF     *float64 `json:"temp_min_f,omitempty"` // average of the monthly lows
+	TempMaxF     *float64 `json:"temp_max_f,omitempty"` // average of the monthly highs
+	AvgRainIn    float64  `json:"avg_rain_in"`
+	AvgRainyDays float64  `json:"avg_rainy_days"`
+}
+type Period uint8
+const (
+	PeriodMonth Period = iota + 1
+	PeriodYear
+)
+type PeriodStat struct {
+	Period       string   `json:"period"` // YYYY-MM or YYYY, local time
+	TempMinF     *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF     *float64 `json:"temp_max_f,omitempty"`
+	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
+	RainIn       float64  `json:"rain_in"`
+	PeakGustMph  *float64 `json:"peak_gust_mph,omitempty"`
+	DaysObserved int64    `json:"days_observed"`
+	RainyDays    int64    `json:"rainy_days"`
+	Obs          int64    `json:"obs"`
+}
+type PressureStats struct {
+	DaysObserved int64 `json:"days_observed"`
+	MeanInHg *float64 `json:"mean_inhg,omitempty"`
+	LowestInHg  *float64 `json:"lowest_inhg,omitempty"`
+	LowestDay   string   `json:"lowest_day,omitempty"`
+	HighestInHg *float64 `json:"highest_inhg,omitempty"`
+	HighestDay  string   `json:"highest_day,omitempty"`
+	LargestFallInHg *float64 `json:"largest_daily_fall_inhg,omitempty"` // biggest day-over-day drop in the daily mean
+	LargestFallDay  string   `json:"largest_daily_fall_day,omitempty"`
+	LargestRiseInHg *float64 `json:"largest_daily_rise_inhg,omitempty"`
+	LargestRiseDay  string   `json:"largest_daily_rise_day,omitempty"`
+}
+type PressureTrend struct {
+	At            int64   `json:"at_epoch"`
+	Time          string  `json:"time"`
+	CurrentInHg   float64 `json:"current_inhg"`
+	WindowHours   float64 `json:"window_hours"`     // actual span between the two samples
+	ChangeInHg    float64 `json:"change_inhg"`      // current minus the older sample
+	ChangeMbPer3h float64 `json:"change_mb_per_3h"` // the standardized 3-hour rate
+	Category      string  `json:"category"`         // rising/falling (rapidly), or steady
+}
+type QueryResult struct {
+	Columns   []string `json:"columns"`
+	Rows      [][]any  `json:"rows"`
+	RowCount  int      `json:"row_count"`
+	Truncated bool     `json:"truncated,omitempty"` // hit maxRows; more rows exist
+}
+type RainStats struct {
+	TotalIn      float64  `json:"total_in"`
+	DaysObserved int64    `json:"days_observed"`
+	RainyDays    int64    `json:"rainy_days"`
+	WettestDay   string   `json:"wettest_day,omitempty"`
+	WettestDayIn *float64 `json:"wettest_day_in,omitempty"`
+	LongestDrySpellDays int64  `json:"longest_dry_spell_days"`
+	DrySpellStart       string `json:"dry_spell_start,omitempty"`
+	DrySpellEnd         string `json:"dry_spell_end,omitempty"`
+	LongestWetSpellDays int64  `json:"longest_wet_spell_days"`
+	WetSpellStart       string `json:"wet_spell_start,omitempty"`
+	WetSpellEnd         string `json:"wet_spell_end,omitempty"`
+}
+type Records struct {
+	HottestF      *float64 `json:"hottest_f,omitempty"`
+	HottestEpoch  *int64   `json:"hottest_epoch,omitempty"`
+	ColdestF      *float64 `json:"coldest_f,omitempty"`
+	ColdestEpoch  *int64   `json:"coldest_epoch,omitempty"`
+	PeakGustMph   *float64 `json:"peak_gust_mph,omitempty"`
+	PeakGustEpoch *int64   `json:"peak_gust_epoch,omitempty"`
+	WettestDay    string   `json:"wettest_day,omitempty"`
+	WettestDayIn  *float64 `json:"wettest_day_in,omitempty"`
+	TotalStrikes  *float64 `json:"total_lightning_strikes,omitempty"`
+	LowestPressureInHg  *float64 `json:"lowest_pressure_inhg,omitempty"`
+	LowestPressureEpoch *int64   `json:"lowest_pressure_epoch,omitempty"`
+	PeakSolarWm2        *float64 `json:"peak_solar_wm2,omitempty"`
+	PeakSolarEpoch      *int64   `json:"peak_solar_epoch,omitempty"`
+	PeakUV              *float64 `json:"peak_uv,omitempty"`
+	PeakUVEpoch         *int64   `json:"peak_uv_epoch,omitempty"`
+}
+type SensorHealth struct {
+	Observations   int64          `json:"observations"`
+	NewestObsEpoch int64          `json:"newest_obs_epoch,omitempty"`
+	Sensors        []SensorStatus `json:"sensors"`
+	BatteryMinV    *float64       `json:"battery_min_v,omitempty"`
+	BatteryMaxV    *float64       `json:"battery_max_v,omitempty"`
+}
+type SensorStatus struct {
+	Sensor      string  `json:"sensor"`
+	Readings    int64   `json:"readings"`
+	CoveragePct float64 `json:"coverage_pct"`
+	LastReading string  `json:"last_reading,omitempty"` // local time of the newest non-null value
+	Stale       bool    `json:"stale,omitempty"`
+}
+type SeriesPoint struct {
+	Epoch        int64    `json:"epoch"` // bucket start, unix seconds
+	Time         string   `json:"time"`  // bucket start, local RFC3339
+	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
+	TempMinF     *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF     *float64 `json:"temp_max_f,omitempty"`
+	HumidityPct  *float64 `json:"humidity_pct,omitempty"`
+	PressureInHg *float64 `json:"pressure_inhg,omitempty"`
+	WindMph      *float64 `json:"wind_mph,omitempty"`
+	GustMph      *float64 `json:"gust_mph,omitempty"`
+	RainIn       float64  `json:"rain_in"`
+	UVMax        *float64 `json:"uv_max,omitempty"`
+	SolarAvgWm2  *float64 `json:"solar_avg_wm2,omitempty"`
+	Strikes      int64    `json:"lightning_strikes"`
+	Obs          int64    `json:"obs"`
+}
+type SolarStats struct {
+	DaysObserved int64 `json:"days_observed"`
+	PeakSolarWm2 *float64 `json:"peak_solar_wm2,omitempty"`
+	PeakSolarDay string   `json:"peak_solar_day,omitempty"`
+	PeakUV    *float64 `json:"peak_uv,omitempty"`
+	PeakUVDay string   `json:"peak_uv_day,omitempty"`
+	MaxIlluminanceLux *float64 `json:"max_illuminance_lux,omitempty"`
+	MaxIlluminanceDay string   `json:"max_illuminance_day,omitempty"`
+	SunniestDay   string   `json:"sunniest_day,omitempty"`
+	SunniestDayMJ *float64 `json:"sunniest_day_mj,omitempty"`
+	// AvgDailyInsolationMJ averages the daily insolation over days that carried at
+	// least one solar reading, so a fully dark-sensor day doesn't dilute it.
+	AvgDailyInsolationMJ *float64 `json:"avg_daily_insolation_mj,omitempty"`
+	TotalInsolationMJ    float64  `json:"total_insolation_mj"`
+}
+type Store struct {
+	// Has unexported fields.
+}
+func Open(ctx context.Context, path string) (*Store, error)
+func (s *Store) ClimateIndices(ctx context.Context, p ClimateIndexParams, startEpoch, endEpoch int64) (ClimateIndexStat, []ClimateIndexStat, error)
+func (s *Store) Close() error
+func (s *Store) ComfortStatistics(ctx context.Context, startEpoch, endEpoch int64) (ComfortStats, error)
+func (s *Store) Coverage(ctx context.Context) (Coverage, error)
+func (s *Store) DailySummary(ctx context.Context, startEpoch, endEpoch int64) ([]DayStat, error)
+func (s *Store) DegreeDays(ctx context.Context, p DegreeDayParams, startEpoch, endEpoch int64) (DegreeDayStat, []DegreeDayStat, error)
+func (s *Store) EachObs(ctx context.Context, startEpoch, endEpoch int64, fn func(model.Obs) error) (err error)
+func (s *Store) Gaps(ctx context.Context, minSeconds int64, limit int) (_ []Gap, err error)
+func (s *Store) HourlyClimatology(ctx context.Context, startEpoch, endEpoch int64) (_ []HourStat, err error)
+func (s *Store) Latest(ctx context.Context) (_ *model.Obs, err error)
+func (s *Store) LightningActivity(ctx context.Context, startEpoch, endEpoch int64) (LightningStats, error)
+func (s *Store) Meta(ctx context.Context, key string) (string, bool, error)
+func (s *Store) MonthlyNormals(ctx context.Context) ([]MonthNormal, error)
+func (s *Store) PeriodSummary(ctx context.Context, period Period, startEpoch, endEpoch int64) ([]PeriodStat, error)
+func (s *Store) PressureStatistics(ctx context.Context, startEpoch, endEpoch int64) (PressureStats, error)
+func (s *Store) PressureTendency(ctx context.Context, windowSeconds int64) (*PressureTrend, bool, error)
+func (s *Store) Query(ctx context.Context, query string, maxRows int) (_ QueryResult, err error)
+func (s *Store) RainStats(ctx context.Context, startEpoch, endEpoch int64) (RainStats, error)
+func (s *Store) Records(ctx context.Context) (Records, error)
+func (s *Store) SensorHealthReport(ctx context.Context, startEpoch, endEpoch int64) (SensorHealth, error)
+func (s *Store) Series(ctx context.Context, startEpoch, endEpoch, bucketSeconds int64) (_ []SeriesPoint, err error)
+func (s *Store) SolarActivity(ctx context.Context, startEpoch, endEpoch int64) (SolarStats, error)
+func (s *Store) TemperatureSpells(ctx context.Context, p TempSpellParams, startEpoch, endEpoch int64) (TempSpells, error)
+func (s *Store) TemperatureTrend(ctx context.Context) (TempTrend, error)
+func (s *Store) ThisDay(ctx context.Context, month, day int) ([]YearDay, error)
+func (s *Store) WindRose(ctx context.Context, startEpoch, endEpoch int64) (_ WindRose, err error)
+func (s *Store) WindStatistics(ctx context.Context, startEpoch, endEpoch int64) (WindStats, error)
+type TempSpellParams struct {
+	HeatMinF float64 // heat-wave day: daily high at or above this (default 90°F)
+	ColdMaxF float64 // cold-snap day: daily low at or below this (default 32°F)
+}
+func (p TempSpellParams) WithDefaults() TempSpellParams
+type TempSpells struct {
+	HeatThresholdF float64 `json:"heat_threshold_f"`
+	ColdThresholdF float64 `json:"cold_threshold_f"`
+	DaysObserved   int64   `json:"days_observed"`
+	LongestHeatWaveDays int64  `json:"longest_heat_wave_days"`
+	HeatWaveStart       string `json:"heat_wave_start,omitempty"`
+	HeatWaveEnd         string `json:"heat_wave_end,omitempty"`
+	LongestColdSnapDays int64  `json:"longest_cold_snap_days"`
+	ColdSnapStart       string `json:"cold_snap_start,omitempty"`
+	ColdSnapEnd         string `json:"cold_snap_end,omitempty"`
+}
+type TempTrend struct {
+	Years      int64  `json:"years"`                 // distinct calendar years with a usable month
+	MonthsUsed int64  `json:"months_used"`           // month-anomalies that fed the fit
+	FirstMonth string `json:"first_month,omitempty"` // YYYY-MM
+	LastMonth  string `json:"last_month,omitempty"`
+	// SlopePerDecadeF is the fitted warming rate in °F per decade; positive is
+	// warming. Nil until the anomalies actually vary over time, which needs the
+	// same calendar month observed in more than one year (a single year, or years
+	// that never share a month, leave every anomaly at zero and carry no trend).
+	SlopePerDecadeF *float64 `json:"slope_per_decade_f,omitempty"`
+	RSquared        *float64 `json:"r_squared,omitempty"` // fit quality, 0..1
+	WarmestAnomalyF *float64 `json:"warmest_anomaly_f,omitempty"`
+	WarmestMonth    string   `json:"warmest_month,omitempty"`
+	ColdestAnomalyF *float64 `json:"coldest_anomaly_f,omitempty"`
+	ColdestMonth    string   `json:"coldest_month,omitempty"`
+}
+type WindRose struct {
+	Sectors          []WindSector `json:"sectors"`
+	CalmPct          float64      `json:"calm_pct"` // share of wind observations below the calm threshold
+	CalmThresholdMph float64      `json:"calm_threshold_mph"`
+	Obs              int64        `json:"obs"` // observations carrying wind data
+}
+type WindSector struct {
+	Sector     string   `json:"sector"` // N, NNE, NE, ... NNW
+	Count      int64    `json:"count"`
+	Pct        float64  `json:"pct"`
+	AvgMph     *float64 `json:"avg_mph,omitempty"`
+	MaxGustMph *float64 `json:"max_gust_mph,omitempty"`
+}
+type WindStats struct {
+	Obs int64 `json:"obs"` // observations carrying wind data
+	AvgWindMph *float64 `json:"avg_wind_mph,omitempty"`
+	MaxSustainedMph *float64 `json:"max_sustained_mph,omitempty"`
+	MaxSustainedDay string   `json:"max_sustained_day,omitempty"`
+	PeakGustMph *float64 `json:"peak_gust_mph,omitempty"`
+	PeakGustDay string   `json:"peak_gust_day,omitempty"`
+	WindiestDay       string   `json:"windiest_day,omitempty"`
+	WindiestDayAvgMph *float64 `json:"windiest_day_avg_mph,omitempty"`
+	CalmPct          float64 `json:"calm_pct"`
+	CalmThresholdMph float64 `json:"calm_threshold_mph"`
+}
+type Writer struct {
+	// Has unexported fields.
+}
+func OpenWriter(ctx context.Context, path string) (*Writer, error)
+func (w *Writer) BindDevice(ctx context.Context, deviceID int) error
+func (w *Writer) Checkpoint(ctx context.Context) error
+func (w *Writer) Close() error
+func (w *Writer) Coverage(ctx context.Context, deviceID int) (Coverage, error)
+func (w *Writer) InsertObs(ctx context.Context, deviceID int, obs []model.DeviceObs) (added int, err error)
+func (w *Writer) Meta(ctx context.Context, key string) (string, bool, error)
+func (w *Writer) SetMeta(ctx context.Context, key, value string) error
+func (w *Writer) Watermark(ctx context.Context, deviceID int) (int64, bool, error)
+type YearDay struct {
+	Year        int      `json:"year"`
+	Day         string   `json:"day"` // YYYY-MM-DD, local time
+	TempMinF    *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF    *float64 `json:"temp_max_f,omitempty"`
+	TempAvgF    *float64 `json:"temp_avg_f,omitempty"`
+	RainIn      float64  `json:"rain_in"`
+	PeakGustMph *float64 `json:"peak_gust_mph,omitempty"`
+	Obs         int64    `json:"obs"`
+}

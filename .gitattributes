@@ -1,0 +1,3 @@
+# Go and SQL sources stay LF everywhere; stops gofmt/CRLF churn on Windows.
+*.go text eol=lf
+*.sql text eol=lf

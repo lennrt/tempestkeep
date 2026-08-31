@@ -1,0 +1,48 @@
+name: Demo qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.0"
+          check-latest: false
+          cache: true
+
+      - name: Build demo binaries
+        run: make mcp tempest demoapi agentdemo
+
+      - name: Install recording dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg ttyd fonts-jetbrains-mono
+          go install github.com/charmbracelet/vhs@v0.11.0
+          echo "$(go env GOPATH)/bin" >>"$GITHUB_PATH"
+
+      - name: Record deterministic mock-data demos
+        run: make vhs
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tempestkeep-demos
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            docs/demo.gif
+            docs/setup.gif
+            docs/agent.gif
+            docs/explore.gif
