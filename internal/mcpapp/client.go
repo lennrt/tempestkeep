@@ -1,4 +1,4 @@
-package main
+package mcpapp
 
 import (
 	"github.com/lennrt/tempestkeep/pkg/tempest/api"

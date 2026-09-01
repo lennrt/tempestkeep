@@ -3,7 +3,7 @@ description: Build or extend the local weather archive in bounded batches
 argument-hint: "[oldest date to reach, YYYY-MM-DD]"
 ---
 
-Build the local weather archive with the `tempest` MCP archive tools. Each
+Build the local weather archive with the `tempestkeep` MCP archive tools. Each
 `backfill_archive` call fetches one bounded batch and is safe to repeat.
 
 Target: $ARGUMENTS (if empty, walk back until the station's history runs out).

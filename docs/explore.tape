@@ -15,12 +15,12 @@ Set TypingSpeed 30ms
 # Invisible setup: binaries on PATH, the mock API up, a temp archive seeded
 # with everything the mock serves.
 Hide
-Type@0ms `export PATH="$PWD/bin:$PATH"; demo=$(mktemp -d) || exit 1; cd "$demo" || exit 1; demoapi -addr 127.0.0.1:8916 >/dev/null 2>&1 & api_pid=$!; export TEMPEST_API_BASE=http://127.0.0.1:8916 TEMPEST_TOKEN=demo TEMPEST_THROTTLE_MS=0 CLICOLOR_FORCE=1; export TEMPEST_DB="$PWD/tempest.sqlite"; tempest collect --no-backup >/dev/null 2>&1; clear`
+Type@0ms `export PATH="$PWD/bin:$PATH"; demo=$(mktemp -d) || exit 1; cd "$demo" || exit 1; demoapi -addr 127.0.0.1:8916 >/dev/null 2>&1 & api_pid=$!; export TEMPEST_API_BASE=http://127.0.0.1:8916 TEMPEST_TOKEN=demo TEMPEST_THROTTLE_MS=0 CLICOLOR_FORCE=1; export TEMPEST_DB="$PWD/tempest.sqlite"; tempestkeep collect --no-backup >/dev/null 2>&1; clear`
 Enter
 Sleep 15
 Show
 
-Type "tempest explore   # the archive you own: day / week / month / year / records"
+Type "tempestkeep explore   # the archive you own: day / week / month / year / records"
 Enter
 Sleep 5
 

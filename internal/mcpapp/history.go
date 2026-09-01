@@ -1,4 +1,4 @@
-package main
+package mcpapp
 
 // This file defines read-only archive analysis tools.
 

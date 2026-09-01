@@ -1,4 +1,4 @@
-// Command agentdemo records docs/agent.tape. It starts tempest-mcp over stdio
+// Command agentdemo records docs/agent.tape. It starts `tempestkeep mcp` over stdio
 // and calls its tools against the local mock API. The text is scripted. Tool
 // results come from the MCP server.
 package main
@@ -37,7 +37,7 @@ func main() {
 	if err := os.Setenv("CLICOLOR_FORCE", "1"); err != nil {
 		log.Fatal(err)
 	}
-	server := flag.String("server", "tempest-mcp", "path to the tempest-mcp binary")
+	server := flag.String("server", "tempestkeep", "path to the tempestkeep binary")
 	flag.Parse()
 	if *pace < 0 || *pace > maxPace {
 		log.Fatalf("pace must be between 0 and %s", maxPace)
@@ -56,7 +56,7 @@ func run(server string) (err error) {
 	defer cancel()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "agentdemo", Version: "0"}, nil)
-	cs, err := client.Connect(ctx, &mcp.CommandTransport{Command: exec.CommandContext(ctx, server)}, nil)
+	cs, err := client.Connect(ctx, &mcp.CommandTransport{Command: exec.CommandContext(ctx, server, "mcp")}, nil)
 	if err != nil {
 		return errors.New("connect to MCP server failed")
 	}

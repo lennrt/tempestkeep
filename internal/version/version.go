@@ -1,5 +1,4 @@
-// Package version reports the TempestKeep build version, shared by the tempest
-// and tempest-mcp binaries.
+// Package version reports the TempestKeep build version.
 package version
 
 import "runtime/debug"

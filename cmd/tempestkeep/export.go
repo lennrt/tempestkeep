@@ -1,6 +1,6 @@
 package main
 
-// Command tempest export writes archive rows as CSV or JSON Lines. It scans a
+// Command tempestkeep export writes archive rows as CSV or JSON Lines. It scans a
 // read-only store and does not buffer the full range. Stored values use SI units.
 // --units us converts values during export.
 
@@ -89,10 +89,10 @@ func cmdExport(args []string) (err error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
-	describe(fs, "tempest export: stream a date range of observations to stdout as CSV or\nJSON Lines, in SI or US units.",
-		"tempest export > archive.csv",
-		"tempest export --start 2024-06-01 --end 2024-06-30 --units us > june.csv",
-		"tempest export --format jsonl | jq .temp_c")
+	describe(fs, "tempestkeep export: stream a date range of observations to stdout as CSV or\nJSON Lines, in SI or US units.",
+		"tempestkeep export > archive.csv",
+		"tempestkeep export --start 2024-06-01 --end 2024-06-30 --units us > june.csv",
+		"tempestkeep export --format jsonl | jq .temp_c")
 	db := fs.String("db", "", "path to the tempest.sqlite archive (or env TEMPEST_DB)")
 	format := fs.String("format", "csv", "output format: csv or jsonl")
 	units := fs.String("units", "si", "unit system: si (stored values) or us (display units)")
@@ -125,7 +125,7 @@ func cmdExport(args []string) (err error) {
 		return err
 	}
 	if dbPath == "" {
-		return fmt.Errorf("no archive configured: set --db/TEMPEST_DB, or run `tempest setup`")
+		return fmt.Errorf("no archive configured: set --db/TEMPEST_DB, or run `tempestkeep setup`")
 	}
 	st, err := store.Open(ctx, dbPath)
 	if err != nil {

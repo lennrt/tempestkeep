@@ -17,7 +17,7 @@ GORELEASER_VERSION := v2.18.0
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X github.com/lennrt/tempestkeep/internal/version.version=$(VERSION)"
 
-.PHONY: all check-go download tidy tidy-check update-deps build build-pure build-arm64 vet fmt fmtcheck docs-check lint workflows vuln test integration e2e live-smoke race fuzz bench cover api-check api-update generated licenses sbom secrets verify mcp tempest demoapi agentdemo demo demo-setup demo-agent demo-explore vhs release-check hooks clean
+.PHONY: all check-go download tidy tidy-check update-deps build build-pure build-arm64 vet fmt fmtcheck docs-check lint workflows vuln test integration e2e live-smoke race fuzz bench cover api-check api-update generated licenses sbom secrets verify tempestkeep demoapi agentdemo demo demo-setup demo-agent demo-explore vhs release-check hooks clean
 
 all: build
 
@@ -39,7 +39,7 @@ update-deps:
 	$(GO) mod tidy
 	$(MAKE) test
 
-build: mcp tempest
+build: tempestkeep
 
 build-pure:
 	CGO_ENABLED=0 $(GO) build ./...
@@ -68,7 +68,7 @@ integration:
 	CGO_ENABLED=0 $(GO) test ./pkg/tempest/api ./pkg/tempest/collect ./pkg/tempest/store -count=1 -timeout=2m
 
 e2e:
-	CGO_ENABLED=0 $(GO) test ./cmd/tempest-mcp -run '^(TestE2E|TestIntegration)' -count=1 -timeout=2m
+	CGO_ENABLED=0 $(GO) test ./cmd/tempestkeep ./internal/mcpapp -run '^(TestE2E|TestIntegration)' -count=1 -timeout=2m
 
 live-smoke:
 	./scripts/live-smoke.sh
@@ -120,13 +120,9 @@ secrets:
 
 verify: check-go download fmtcheck docs-check tidy-check vet test race fuzz lint workflows generated vuln licenses sbom secrets build-pure build-arm64
 
-mcp:
+tempestkeep:
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $(BIN_DIR)/tempest-mcp ./cmd/tempest-mcp
-
-tempest:
-	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $(BIN_DIR)/tempest ./cmd/tempest
+	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $(BIN_DIR)/tempestkeep ./cmd/tempestkeep
 
 demoapi:
 	@mkdir -p $(BIN_DIR)
@@ -136,16 +132,16 @@ agentdemo:
 	@mkdir -p $(BIN_DIR)
 	CGO_ENABLED=0 $(GO) build -o $(BIN_DIR)/agentdemo ./internal/demo/agentdemo
 
-demo: mcp tempest demoapi
+demo: tempestkeep demoapi
 	vhs docs/demo.tape
 
-demo-setup: tempest demoapi
+demo-setup: tempestkeep demoapi
 	vhs docs/setup.tape
 
-demo-agent: mcp demoapi agentdemo
+demo-agent: tempestkeep demoapi agentdemo
 	vhs docs/agent.tape
 
-demo-explore: tempest demoapi
+demo-explore: tempestkeep demoapi
 	vhs docs/explore.tape
 
 vhs: demo demo-setup demo-agent demo-explore
@@ -158,6 +154,6 @@ hooks:
 	@echo "Installed the check-only hooks from .githooks."
 
 clean:
-	rm -f "$(BIN_DIR)/tempest" "$(BIN_DIR)/tempest-mcp" "$(BIN_DIR)/demoapi" "$(BIN_DIR)/agentdemo" coverage.out
+	rm -f "$(BIN_DIR)/tempestkeep" "$(BIN_DIR)/tempest" "$(BIN_DIR)/tempest-mcp" "$(BIN_DIR)/demoapi" "$(BIN_DIR)/agentdemo" coverage.out
 	@rmdir "$(BIN_DIR)" 2>/dev/null || true
 	rm -rf -- "$(CURDIR)/dist"

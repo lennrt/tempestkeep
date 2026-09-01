@@ -1,4 +1,4 @@
-package main
+package mcpapp
 
 // This file defines append-only archive tools. They require live access and a
 // writable archive. Inserts use the device and observations returned by the API.

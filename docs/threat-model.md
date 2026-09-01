@@ -2,7 +2,7 @@
 
 ## Scope
 
-This model covers `tempest`, `tempest-mcp`, the shared Go packages, the local
+This model covers `tempestkeep`, its MCP mode, the shared Go packages, the local
 SQLite archive, configuration files, and repository automation. It does not
 cover the WeatherFlow service, the MCP client, the operating system, or GitHub
 as trusted implementations.

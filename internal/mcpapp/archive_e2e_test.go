@@ -1,4 +1,4 @@
-package main
+package mcpapp
 
 // End-to-end test of the archive write path, exercised the way a real agent
 // drives it (over the MCP protocol) but with the WeatherFlow REST API replaced
@@ -101,7 +101,7 @@ func connectWritableServer(t *testing.T, ctx context.Context, token, dbPath stri
 	}
 	closeOnCleanup(t, st)
 
-	srv := mcp.NewServer(&mcp.Implementation{Name: "tempest-mcp", Version: "test"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "tempestkeep", Version: "test"}, nil)
 	registerTools(srv, live, st)
 	registerArchiveTools(srv, live, writer)
 

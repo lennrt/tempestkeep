@@ -1,62 +1,34 @@
-// Command tempest-mcp serves Tempest weather data over MCP stdio.
-// TEMPEST_TOKEN enables live tools. --db or TEMPEST_DB enables archive tools.
+// Package mcpapp serves Tempest weather data over MCP stdio.
 // The server opens the archive read-only unless archive writes are configured.
 // Stdout contains MCP messages only. Logs use stderr.
-package main
+package mcpapp
 
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log"
-	"os"
-	"os/signal"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/lennrt/tempestkeep/internal/version"
 	"github.com/lennrt/tempestkeep/pkg/tempest/api"
-	"github.com/lennrt/tempestkeep/pkg/tempest/config"
 	"github.com/lennrt/tempestkeep/pkg/tempest/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
-	}
+// Options contains resolved MCP inputs. Run borrows these values for the call.
+type Options struct {
+	Token    string
+	DBPath   string
+	ReadOnly bool
 }
 
-// run returns errors so deferred cleanup runs before log.Fatal exits.
-func run() (err error) {
-	dbFlag := flag.String("db", "", "path to the tempest.sqlite archive (or env TEMPEST_DB)")
-	readOnlyFlag := flag.Bool("read-only", false, "never write to the archive: disable the backfill/sync tools (or env TEMPEST_READ_ONLY)")
-	versionFlag := flag.Bool("version", false, "print the version and exit")
-	flag.Parse()
-
-	if *versionFlag {
-		fmt.Printf("tempest-mcp %s\n", version.String())
-		return nil
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	if err := config.LoadDotenv(ctx, ".env"); err != nil {
+// Run serves MCP until the context is canceled or the transport fails.
+func Run(ctx context.Context, opts Options) (err error) {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-
-	token := os.Getenv("TEMPEST_TOKEN")
-	dbPath, err := config.ResolveDB(ctx, *dbFlag)
-	if err != nil {
-		return err
-	}
-	envReadOnly, err := readOnlyEnv()
-	if err != nil {
-		return err
-	}
-	readOnly := *readOnlyFlag || envReadOnly
 
 	var (
 		live   *liveSource
@@ -65,8 +37,8 @@ func run() (err error) {
 	)
 
 	// Resolve the station on first use. An unavailable API must not delay startup.
-	if token != "" {
-		client, err := newAPIClient(token)
+	if opts.Token != "" {
+		client, err := newAPIClient(opts.Token)
 		if err != nil {
 			return err
 		}
@@ -74,8 +46,8 @@ func run() (err error) {
 	}
 
 	// Open the writer first. It creates the schema before the read handle opens.
-	if token != "" && dbPath != "" && !readOnly {
-		writer, err = store.OpenWriter(ctx, dbPath)
+	if opts.Token != "" && opts.DBPath != "" && !opts.ReadOnly {
+		writer, err = store.OpenWriter(ctx, opts.DBPath)
 		if err != nil {
 			return fmt.Errorf("open configured archive for writes: %w", err)
 		}
@@ -83,14 +55,14 @@ func run() (err error) {
 		log.Print("archive write access is ready")
 	}
 
-	if dbPath != "" {
-		st, err = store.Open(ctx, dbPath)
+	if opts.DBPath != "" {
+		st, err = store.Open(ctx, opts.DBPath)
 		if err != nil {
 			return fmt.Errorf("open configured archive for reads: %w", err)
 		}
 		defer func() { err = errors.Join(err, st.Close()) }()
 		if writer == nil {
-			log.Printf("archive read access is ready%s", readOnlyNote(readOnly))
+			log.Printf("archive read access is ready%s", readOnlyNote(opts.ReadOnly))
 		}
 	}
 
@@ -98,13 +70,13 @@ func run() (err error) {
 		return fmt.Errorf("no data source: set TEMPEST_TOKEN and/or --db/TEMPEST_DB")
 	}
 
-	srv := mcp.NewServer(&mcp.Implementation{Name: "tempest-mcp", Version: version.String()}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "tempestkeep", Version: version.String()}, nil)
 	registerTools(srv, live, st)
 	if writer != nil && live != nil {
 		registerArchiveTools(srv, live, writer)
 	}
 
-	log.Printf("tempest-mcp %s ready (live=%v, archive=%v, writable=%v)", version.String(), live != nil, st != nil, writer != nil)
+	log.Printf("tempestkeep mcp %s ready (live=%v, archive=%v, writable=%v)", version.String(), live != nil, st != nil, writer != nil)
 	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -148,19 +120,6 @@ func readOnlyNote(readOnly bool) string {
 		return " (read-only)"
 	}
 	return ""
-}
-
-// readOnlyEnv parses TEMPEST_READ_ONLY. It rejects unknown values to prevent an
-// invalid read-only setting from enabling write tools.
-func readOnlyEnv() (bool, error) {
-	const key = "TEMPEST_READ_ONLY"
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
-	case "1", "true", "yes", "on":
-		return true, nil
-	case "", "0", "false", "no", "off":
-		return false, nil
-	}
-	return false, fmt.Errorf("%s must be a boolean (1/0, true/false, yes/no, on/off)", key)
 }
 
 // liveSource resolves and caches one station and device. Failed lookups are not

@@ -36,9 +36,9 @@ func cmdCollect(args []string) error {
 
 	fs := flag.NewFlagSet("collect", flag.ContinueOnError)
 	describe(fs, "Build or refresh the local SQLite archive from the WeatherFlow REST API.\nA repeated run resumes after the last stored observation. Ctrl-C cancels the run.",
-		"tempest collect",
-		"tempest collect --backfill-start 2023-01-01",
-		"tempest collect --quiet   # for cron; progress off, errors still print")
+		"tempestkeep collect",
+		"tempestkeep collect --backfill-start 2023-01-01",
+		"tempestkeep collect --quiet   # for cron; progress off, errors still print")
 	db := fs.String("db", "", "archive path (or env TEMPEST_DB; default ./tempest.sqlite)")
 	deviceID := fs.Int("device-id", 0, "Tempest device id (or env TEMPEST_DEVICE_ID; auto-discovered if unset)")
 	backfillStart := fs.String("backfill-start", "", "earliest date to backfill on a fresh archive, YYYY-MM-DD (default: walk back until history ends)")
@@ -194,7 +194,7 @@ func cmdCollect(args []string) error {
 	var operationErr error
 	switch {
 	case errors.Is(collectErr, context.Canceled):
-		operationErr = errors.New("interrupted; progress is saved, re-run 'tempest collect' to resume")
+		operationErr = errors.New("interrupted; progress is saved, re-run 'tempestkeep collect' to resume")
 	case collectErr != nil:
 		operationErr = fmt.Errorf("collection stopped early (re-run to resume): %w", collectErr)
 	}
@@ -224,16 +224,16 @@ func wrapIfError(message string, err error) error {
 	return fmt.Errorf("%s: %w", message, err)
 }
 
-// cmdListDevices implements `tempest list-devices`: print the stations and
+// cmdListDevices implements `tempestkeep list-devices`: print the stations and
 // devices the token can see, so a user can pick a --device-id.
 func cmdListDevices(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	fs := flag.NewFlagSet("list-devices", flag.ContinueOnError)
-	describe(fs, "tempest list-devices: list the stations and devices your token can see,\nso you can pick a --device-id for collect.",
-		"tempest list-devices",
-		"tempest list-devices --format json | jq '.[].devices'")
+	describe(fs, "tempestkeep list-devices: list the stations and devices your token can see,\nso you can pick a --device-id for collect.",
+		"tempestkeep list-devices",
+		"tempestkeep list-devices --format json | jq '.[].devices'")
 	format := fs.String("format", "text", "output format: text or json")
 	if err := parseFlags(fs, args); err != nil {
 		return err

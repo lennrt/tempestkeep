@@ -1,18 +1,18 @@
 # TempestKeep plugin
 
-This package connects the `tempest-mcp` command to Claude Code. It also contains
+This package connects `tempestkeep mcp` to Claude Code. It also contains
 three commands and one station-analysis skill. The MCP server remains a standard
 stdio server and does not depend on the plugin.
 
 ## Prerequisites
 
-Build `tempest-mcp` from the repository with Go 1.27.0:
+Build `tempestkeep` from the repository with Go 1.27.0:
 
 ```sh
-make mcp
+make tempestkeep
 ```
 
-Place `bin/tempest-mcp` on `PATH`. Configure `TEMPEST_TOKEN` and `TEMPEST_DB` in
+Place `bin/tempestkeep` on `PATH`. Configure `TEMPEST_TOKEN` and `TEMPEST_DB` in
 the client environment. Do not paste a token into chat or place it in a command
 argument.
 

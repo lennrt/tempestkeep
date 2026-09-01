@@ -23,7 +23,7 @@ import (
 	"github.com/lennrt/tempestkeep/pkg/tempest/store"
 )
 
-// nowConfig is the resolved data source for `tempest now`: a live client (with a
+// nowConfig is the resolved data source for `tempestkeep now`: a live client (with a
 // pre-resolved station) and/or a read-only archive to fall back on.
 type nowConfig struct {
 	live  *nowLiveSource
@@ -120,7 +120,7 @@ func (c nowConfig) load(ctx context.Context) (dashboard, error) {
 			return dashboard{}, err
 		}
 		if o == nil {
-			return dashboard{}, fmt.Errorf("archive has no observations yet; run `tempest collect` first")
+			return dashboard{}, fmt.Errorf("archive has no observations yet; run `tempestkeep collect` first")
 		}
 		stationName := ""
 		if c.live != nil {
@@ -324,16 +324,16 @@ func errorCard(err error) string {
 
 // ---- command ----------------------------------------------------------------
 
-// cmdNow implements `tempest now`: a live, auto-refreshing dashboard, or a single
+// cmdNow implements `tempestkeep now`: a live, auto-refreshing dashboard, or a single
 // rendered frame with --once (pipe-friendly, like wttr.in).
 func cmdNow(args []string) (err error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	fs := flag.NewFlagSet("now", flag.ContinueOnError)
-	describe(fs, "tempest now: current conditions as a live terminal dashboard. Use --once\nfor a single frame, or --format json for scriptable output.",
-		"tempest now",
-		"tempest now --once",
-		"tempest now --format json | jq .temp_f")
+	describe(fs, "tempestkeep now: current conditions as a live terminal dashboard. Use --once\nfor a single frame, or --format json for scriptable output.",
+		"tempestkeep now",
+		"tempestkeep now --once",
+		"tempestkeep now --format json | jq .temp_f")
 	db := fs.String("db", "", "path to the tempest.sqlite archive (or env TEMPEST_DB)")
 	once := fs.Bool("once", false, "render one frame to stdout and exit (no interactive UI)")
 	format := fs.String("format", "text", "output format: text or json (json implies one frame, like --once)")
@@ -386,7 +386,7 @@ func cmdNow(args []string) (err error) {
 	return err
 }
 
-// nowJSON is the machine-readable shape of `tempest now --format json`: the same
+// nowJSON is the machine-readable shape of `tempestkeep now --format json`: the same
 // current conditions the card shows, in display units, with json-stable keys
 // that mirror the MCP current_conditions tool so scripts see one schema.
 type nowJSON struct {
@@ -452,7 +452,7 @@ func resolveNowConfig(ctx context.Context, dbFlag string) (nowConfig, error) {
 		cfg.live = &nowLiveSource{client: client}
 	}
 	if cfg.live == nil && cfg.store == nil {
-		return cfg, fmt.Errorf("no data source: run `tempest setup`, set TEMPEST_TOKEN, or set --db/TEMPEST_DB")
+		return cfg, fmt.Errorf("no data source: run `tempestkeep setup`, set TEMPEST_TOKEN, or set --db/TEMPEST_DB")
 	}
 	return cfg, nil
 }

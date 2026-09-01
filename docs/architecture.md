@@ -1,20 +1,23 @@
 # Architecture
 
-TempestKeep builds two Go 1.27.0 commands over one shared core:
+TempestKeep builds one Go 1.27.0 command over one shared core:
 
-- `tempest` owns setup, collection, export, reports, and terminal views.
-- `tempest-mcp` exposes live and archived data over MCP stdio.
+- `tempestkeep` owns setup, collection, export, reports, and terminal views.
+- `tempestkeep mcp` exposes live and archived data over MCP stdio.
 - `pkg/tempest` owns the API client, model, collector, configuration, and store.
 
 ```mermaid
 flowchart LR
     WF[WeatherFlow REST API]
-    CLI[tempest]
-    MCP[tempest-mcp]
+    APP[tempestkeep]
+    CLI[CLI commands]
+    MCP[mcp subcommand]
     CORE[pkg/tempest]
     DB[(SQLite archive)]
     CLIENT[MCP client]
 
+    APP --> CLI
+    APP --> MCP
     CLI --> CORE
     MCP --> CORE
     CORE -->|authenticated HTTPS reads| WF

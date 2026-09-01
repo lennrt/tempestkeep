@@ -10,18 +10,23 @@ tool call. Skip a phase only after you verify its result.
 
 ## 1. Check the server
 
-Call the `tempest` server's `current_conditions` tool (or `archive_status`).
+Confirm that the MCP client connected to the `tempestkeep` server.
 
-- If a tool returns data, go to phase 4.
-- If a tool reports "no token," go to phase 2.
-- If no `tempest` tools exist, build and install the binary. In a local checkout,
-  run:
+- If the client reports that `tempestkeep` is not executable, build and install
+  the binary. In a local checkout, run:
 
   ```
-  make mcp
+  make tempestkeep
   ```
 
-  Put `bin/tempest-mcp` on `PATH`. Restart the MCP client.
+  Put `bin/tempestkeep` on `PATH`. Restart the MCP client.
+- If startup reports "no data source," go to phase 2 or configure an existing
+  archive in phase 3.
+- If startup cannot open the configured archive, correct or remove `TEMPEST_DB`.
+- If the server connects, call `list_stations` when that tool is available. A
+  successful call proves that the configured token works. An authorization
+  failure returns to phase 2. If the tool is absent, the server is archive-only;
+  ask whether the user wants live access before continuing.
 
 ## 2. Personal access token
 
@@ -56,9 +61,10 @@ Restart the MCP client to load the setting.
 
 ## 4. Prove it works
 
-Call `current_conditions`. Show one line with the result. If the token is invalid,
-return to phase 2. A missing configured archive is a startup error; correct or
-remove `TEMPEST_DB` before continuing.
+For live access, call `list_stations` and require a successful result. Then call
+`current_conditions` and show one line with the result. In archive-only mode,
+call `archive_status` before `current_conditions`. A missing configured archive
+is a startup error; correct or remove `TEMPEST_DB` before continuing.
 
 ## 5. Offer to build the history
 
@@ -71,8 +77,8 @@ Ask if the user wants to build the local archive. If yes:
 3. Call `archive_status`. Report the coverage span, row count, and one result from
    `records`.
 
-If the user declines, state that `tempest collect` builds the same archive from a
-terminal.
+If the user declines, state that `tempestkeep collect` builds the same archive
+from a terminal.
 
 </phases>
 

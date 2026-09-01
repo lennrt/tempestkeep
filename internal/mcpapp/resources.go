@@ -1,4 +1,4 @@
-package main
+package mcpapp
 
 // MCP resources and prompts: the archive's schema and a data
 // dictionary, so an agent can orient itself (especially before reaching for

@@ -1,4 +1,4 @@
-package main
+package mcpapp
 
 import (
 	"context"
@@ -32,21 +32,6 @@ func TestOptionalBoundedInt(t *testing.T) {
 			t.Errorf("optionalBoundedInt(%d,%d,%d) = %d, %v; want %d, error=%v",
 				tc.v, tc.def, tc.max, got, err, tc.want, tc.wantErr)
 		}
-	}
-}
-
-func TestBoolEnvRejectsInvalidValue(t *testing.T) {
-	t.Setenv("TEMPEST_READ_ONLY", "true")
-	if got, err := readOnlyEnv(); err != nil || !got {
-		t.Fatalf("readOnlyEnv(true) = %v, %v", got, err)
-	}
-	t.Setenv("TEMPEST_READ_ONLY", "off")
-	if got, err := readOnlyEnv(); err != nil || got {
-		t.Fatalf("readOnlyEnv(off) = %v, %v", got, err)
-	}
-	t.Setenv("TEMPEST_READ_ONLY", "tru")
-	if _, err := readOnlyEnv(); err == nil {
-		t.Fatal("readOnlyEnv accepted a misspelled security setting")
 	}
 }
 

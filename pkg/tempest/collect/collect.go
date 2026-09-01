@@ -428,7 +428,7 @@ type Summary struct {
 }
 
 // Collect performs the whole-device collector behavior,
-// exposed as one call for `tempest collect`:
+// exposed as one call for `tempestkeep collect`:
 //
 //   - if the device already has data, incrementally Sync forward to now, then
 //     resume an interrupted seed walk if one left a cursor behind;

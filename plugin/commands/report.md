@@ -3,7 +3,7 @@ description: "Full weather report: now, the week ahead, and today in your statio
 argument-hint: ""
 ---
 
-Produce a weather report from the user's station with the `tempest` MCP tools.
+Produce a weather report from the user's station with the `tempestkeep` MCP tools.
 Gather the data before writing. Do not stream raw tool results.
 
 1. `current_conditions`: the now.

@@ -1,16 +1,16 @@
-# `tempest-mcp`
+# `tempestkeep mcp`
 
-`tempest-mcp` serves live and archived Tempest data over MCP stdio.
+`tempestkeep mcp` serves live and archived Tempest data over MCP stdio.
 
 ## Build
 
 Use Go 1.27.0 from the repository root:
 
 ```sh
-make mcp
+make tempestkeep
 ```
 
-The result is `bin/tempest-mcp`.
+The result is `bin/tempestkeep`.
 
 ## Configure
 
@@ -51,7 +51,7 @@ server does not expose arbitrary write SQL.
 Start an archive-only server:
 
 ```sh
-bin/tempest-mcp --db ./tempest.sqlite
+bin/tempestkeep mcp --db ./tempest.sqlite
 ```
 
 The process waits for MCP JSON-RPC on stdin. Stdout carries JSON-RPC only.
@@ -71,9 +71,8 @@ after a failure.
 - Calendar results use the process timezone.
 - Live operations depend on WeatherFlow availability and token permissions.
 
-See [the architecture](../../docs/architecture.md),
-[the threat model](../../docs/threat-model.md), and
-[the property catalog](../../docs/testing/properties.md).
+See [the architecture](architecture.md), [the threat model](threat-model.md),
+and [the property catalog](testing/properties.md).
 
 TempestKeep is independent and is not affiliated with or endorsed by WeatherFlow
 or the Tempest weather platform.

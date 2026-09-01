@@ -41,10 +41,19 @@ make release-check
 The Go version must be exactly 1.27.0. The first three commands must pass. The
 last command creates local snapshot archives in `dist/` without publishing them.
 
-Inspect every archive. Confirm that it contains the expected two binaries,
+Inspect every archive. Confirm that it contains the `tempestkeep` binary,
 `LICENSE`, `NOTICE.md`, `README.md`, and `docs/tempestkeep-hero.jpg`. Verify
-`dist/checksums.txt` against the archives. Generate the CycloneDX SBOM with
-`make sbom` and retain its digest with the qualification evidence.
+`dist/checksums.txt` against the archives:
+
+```sh
+(
+  cd dist
+  shasum -a 256 -c checksums.txt
+)
+```
+
+Generate the CycloneDX SBOM with `make sbom` and retain its digest with the
+qualification evidence.
 
 Record:
 
@@ -59,6 +68,9 @@ Record:
 
 Remove `dist/` with `make clean` after review unless the maintainer explicitly
 retains it as local evidence.
+
+Use [docs/homebrew.md](docs/homebrew.md) to qualify a project-tap formula from
+the final public source archive. Tap publication is a separate approved change.
 
 ## Publish
 

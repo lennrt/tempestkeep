@@ -20,7 +20,7 @@ Enter
 Sleep 2
 Show
 
-Type "tempest setup   # first run? the wizard takes it from here"
+Type "tempestkeep setup   # first run? the wizard takes it from here"
 Enter
 Sleep 4
 

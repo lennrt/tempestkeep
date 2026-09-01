@@ -24,7 +24,7 @@ jobs:
           cache: true
 
       - name: Build demo binaries
-        run: make mcp tempest demoapi agentdemo
+        run: make tempestkeep demoapi agentdemo
 
       - name: Install recording dependencies
         run: |

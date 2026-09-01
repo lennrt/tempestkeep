@@ -5,9 +5,9 @@ building, setup, collection, MCP operation, privacy, and verification.
 
 ## Use TempestKeep
 
-- [`tempest` command guide](../cmd/tempest/README.md): setup, collection,
+- [`tempestkeep` command guide](../cmd/tempestkeep/README.md): setup, collection,
   displays, exports, and configuration precedence.
-- [`tempest-mcp` command guide](../cmd/tempest-mcp/README.md): MCP inputs,
+- [`tempestkeep mcp` guide](mcp.md): MCP inputs,
   capabilities, limits, and startup behavior.
 - [Plugin guide](../plugin/README.md): optional client integration.
 - [Support guide](../SUPPORT.md): where to ask for help and what to include.
@@ -19,6 +19,8 @@ building, setup, collection, MCP operation, privacy, and verification.
 - [Public API snapshot](public-api.txt): exported Go declarations and JSON tags.
 - [Engineering baseline ADR](adr/0001-modern-go-engineering-baseline.md): Go,
   API, compatibility, CI, and release decisions.
+- [Single-command and Homebrew tap ADR](adr/0002-single-command-and-homebrew-tap.md):
+  executable naming, MCP dispatch, and distribution decisions.
 
 ## Review correctness and security
 
@@ -37,6 +39,8 @@ building, setup, collection, MCP operation, privacy, and verification.
 - [Contribution guide](../CONTRIBUTING.md): required checks and design rules.
 - [Release process](../RELEASING.md): qualification, approval, evidence, and
   rollback requirements.
+- [Homebrew tap runbook](homebrew.md): formula contract, validation, and
+  project-maintained tap publication.
 
 ## Demo sources
 

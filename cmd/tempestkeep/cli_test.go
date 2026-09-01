@@ -80,7 +80,7 @@ func TestRootREADMEListsEveryTopLevelCommand(t *testing.T) {
 	}
 	slices.Sort(names)
 	for _, name := range names {
-		if !strings.Contains(string(data), "tempest "+name) {
+		if !strings.Contains(string(data), "tempestkeep "+name) {
 			t.Errorf("root README does not list the %q command", name)
 		}
 	}

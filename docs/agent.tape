@@ -1,5 +1,5 @@
 # Run `make demo-agent` from the repository root. Install vhs, ttyd, and ffmpeg
-# first. The command starts tempest-mcp over stdio and calls it through MCP. It
+# first. The command starts `tempestkeep mcp` over stdio and calls it through MCP. It
 # uses the local deterministic mock API. The displayed text is scripted.
 
 Output docs/agent.gif
@@ -19,7 +19,7 @@ Enter
 Sleep 2
 Show
 
-Type "agentdemo   # a real MCP client driving tempest-mcp, like your agent does"
+Type "agentdemo   # a real MCP client driving tempestkeep mcp, like your agent does"
 Enter
 
 # The session: backfill_archive walks history back, then the analytics tools

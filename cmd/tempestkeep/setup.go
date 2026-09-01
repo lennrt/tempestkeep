@@ -30,8 +30,8 @@ func cmdSetup(args []string) error {
 
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	describe(fs, "Configure a token, archive location, and MCP command in an interactive terminal.\nThe command writes an owner-only environment file.",
-		"tempest setup",
-		"tempest setup --env ~/weather/.env")
+		"tempestkeep setup",
+		"tempestkeep setup --env ~/weather/.env")
 	envPath := fs.String("env", ".env", "path of the env file to write")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -262,12 +262,12 @@ func printNextSteps(dbPath string) {
 	fmt.Println(bold.Render("  Next steps"))
 	if dbPath != "" {
 		fmt.Println("    1. Build your local archive (resumable, safe to re-run):")
-		fmt.Println(cmd.Render("         tempest collect"))
+		fmt.Println(cmd.Render("         tempestkeep collect"))
 		fmt.Println("    2. Watch live conditions:")
-		fmt.Println(cmd.Render("         tempest now"))
+		fmt.Println(cmd.Render("         tempestkeep now"))
 	} else {
 		fmt.Println("    1. Watch live conditions:")
-		fmt.Println(cmd.Render("         tempest now"))
+		fmt.Println(cmd.Render("         tempestkeep now"))
 	}
 
 	// The archive branch above prints two steps, the no-archive branch one, so
@@ -276,7 +276,7 @@ func printNextSteps(dbPath string) {
 	if dbPath != "" {
 		mcpStep = 3
 	}
-	fmt.Printf("    %d. Give the data to Claude Code (or point any MCP client at tempest-mcp):\n", mcpStep)
+	fmt.Printf("    %d. Give the data to Claude Code (or point any MCP client at tempestkeep mcp):\n", mcpStep)
 	fmt.Println(faint().Render("       Set TEMPEST_TOKEN in the MCP client's private environment first."))
 	for _, line := range mcpRegistrationCommand(dbPath) {
 		fmt.Println(cmd.Render("         " + line))
@@ -290,15 +290,15 @@ func printNextSteps(dbPath string) {
 
 func mcpRegistrationCommand(dbPath string) []string {
 	if runtime.GOOS == "windows" {
-		line := "claude mcp add tempest -- tempest-mcp"
+		line := "claude mcp add tempestkeep -- tempestkeep mcp"
 		if dbPath != "" {
 			line += " --db " + commandArg(dbPath)
 		}
 		return []string{line}
 	}
 	lines := []string{
-		"claude mcp add tempest \\",
-		"  -- tempest-mcp",
+		"claude mcp add tempestkeep \\",
+		"  -- tempestkeep mcp",
 	}
 	if dbPath != "" {
 		lines[1] += " \\"
@@ -378,7 +378,7 @@ func writeEnvFile(path string, existing, updates map[string]string) error {
 	maps.Copy(merged, updates)
 
 	var b strings.Builder
-	b.WriteString("# TempestKeep configuration, written by `tempest setup`.\n")
+	b.WriteString("# TempestKeep configuration, written by `tempestkeep setup`.\n")
 	ours := []string{"TEMPEST_TOKEN", "TEMPEST_DB", "TEMPEST_DEVICE_ID"}
 	for _, k := range ours {
 		if v, ok := merged[k]; ok {

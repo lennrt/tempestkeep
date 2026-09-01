@@ -9,8 +9,7 @@
 /data/
 
 # Go build output (binaries live in cmd/*; build them locally)
-/tempest-mcp
-/tempest
+/tempestkeep
 *.exe
 /bin/
 /coverage.out

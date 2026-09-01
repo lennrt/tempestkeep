@@ -1,4 +1,4 @@
-package main
+package mcpapp
 
 // Coverage tests that exercise every remaining MCP tool over the real protocol:
 //   - the analytics tools on a *populated* archive (the two-row fixture in
@@ -352,7 +352,7 @@ func connectLiveServer(t *testing.T, ctx context.Context, token string) *mcp.Cli
 		t.Fatal(err)
 	}
 	live := &liveSource{client: apiClient}
-	srv := mcp.NewServer(&mcp.Implementation{Name: "tempest-mcp", Version: "test"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "tempestkeep", Version: "test"}, nil)
 	registerTools(srv, live, nil) // st=nil -> live-only
 
 	clientT, serverT := mcp.NewInMemoryTransports()
@@ -488,7 +488,7 @@ func TestReadOnlyModeDropsWriteTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	live := &liveSource{client: apiClient}
-	server := mcp.NewServer(&mcp.Implementation{Name: "tempest-mcp", Version: "test"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "tempestkeep", Version: "test"}, nil)
 	registerTools(server, live, st) // read-only: registerArchiveTools is NOT called
 
 	clientT, serverT := mcp.NewInMemoryTransports()

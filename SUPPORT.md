@@ -8,7 +8,7 @@ Do not put sensitive station data in either channel.
 
 1. Read the [quickstart](README.md) and the relevant command guide in
    [docs/README.md](docs/README.md).
-2. Run `tempest help <command>` or inspect the MCP tool description.
+2. Run `tempestkeep help <command>` or inspect the MCP tool description.
 3. Reproduce the problem with the default branch and Go 1.27.0 when practical.
 4. Run the smallest relevant check from [CONTRIBUTING.md](CONTRIBUTING.md).
 

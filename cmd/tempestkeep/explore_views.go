@@ -18,7 +18,7 @@ import (
 
 // heatMetric is one way to tint a calendar cell: which value of a day it
 // reads, and how that value maps to a color. Temperatures use the absolute
-// cold→hot ramp shared with `tempest now`; rain and gust normalize to the
+// cold→hot ramp shared with `tempestkeep now`; rain and gust normalize to the
 // period being viewed, so "wettest day this month" always saturates.
 type heatMetric struct {
 	name   string

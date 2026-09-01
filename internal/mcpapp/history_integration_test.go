@@ -1,4 +1,4 @@
-package main
+package mcpapp
 
 // Integration tests for the analytics tools, resources, and prompts, driven
 // over the real MCP protocol against a small archive, the same wire path an

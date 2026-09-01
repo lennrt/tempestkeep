@@ -1,32 +1,34 @@
-# `tempest`
+# `tempestkeep`
 
-`tempest` configures, collects, reads, exports, and displays Tempest data.
+`tempestkeep` configures, collects, reads, exports, and displays Tempest data. It
+also serves the same live and archived data over MCP stdio.
 
 ## Build
 
 Use Go 1.27.0 from the repository root:
 
 ```sh
-make tempest
+make tempestkeep
 ```
 
-The result is `bin/tempest`.
+The result is `bin/tempestkeep`.
 
 ## Commands
 
 ```text
-tempest setup          Configure a token and archive.
-tempest list-devices   List station and device data visible to the token.
-tempest collect        Create or update one device archive.
-tempest now            Show live or archived current conditions.
-tempest explore        Browse archive periods and records.
-tempest stats          Print an archive report.
-tempest export         Write CSV or JSON Lines.
-tempest version        Print the installed version.
-tempest help           Show help.
+tempestkeep setup          Configure a token and archive.
+tempestkeep list-devices   List station and device data visible to the token.
+tempestkeep collect        Create or update one device archive.
+tempestkeep now            Show live or archived current conditions.
+tempestkeep explore        Browse archive periods and records.
+tempestkeep stats          Print an archive report.
+tempestkeep export         Write CSV or JSON Lines.
+tempestkeep mcp            Serve live and archived data over MCP stdio.
+tempestkeep version        Print the installed version.
+tempestkeep help           Show help.
 ```
 
-Run `tempest help <command>` for prerequisites, flags, limits, and examples.
+Run `tempestkeep help <command>` for prerequisites, flags, limits, and examples.
 Usage errors exit with status 2. Runtime failures exit with status 1. Help exits
 with status 0.
 
@@ -35,7 +37,7 @@ with status 0.
 Run:
 
 ```sh
-bin/tempest setup
+bin/tempestkeep setup
 ```
 
 The wizard validates the token and writes selected configuration. If you create
@@ -50,7 +52,7 @@ Do not place a token in a command argument.
 
 ## Collection
 
-Run `tempest collect` on a new archive to walk backward through available
+Run `tempestkeep collect` on a new archive to walk backward through available
 history. Run it again to sync from the stored watermark. Use
 `--backfill-start YYYY-MM-DD` to set an explicit oldest date on a new archive.
 
@@ -66,14 +68,14 @@ backups. Backup failure returns an error and leaves the archive intact.
 
 ## Display and export
 
-`tempest now` uses live data when a token exists. It can fall back to the latest
+`tempestkeep now` uses live data when a token exists. It can fall back to the latest
 archive row. Use `--once` for one frame and `--format json` for structured output.
 
-`tempest explore` reads the archive only. Use arrow keys to move between periods,
+`tempestkeep explore` reads the archive only. Use arrow keys to move between periods,
 `d`, `w`, `m`, `y`, or `r` to select a view, `tab` to change the heatmap metric,
 and `q` to exit.
 
-`tempest stats` writes text or JSON to stdout. `tempest export` streams CSV or
+`tempestkeep stats` writes text or JSON to stdout. `tempestkeep export` streams CSV or
 JSON Lines to stdout. Redirect those outputs only to a protected location; they
 contain station observations.
 
@@ -90,6 +92,9 @@ Move a completed backup or export, not an active WAL database.
 
 See [the root quickstart](../../README.md) and
 [the architecture](../../docs/architecture.md).
+
+See [the MCP guide](../../docs/mcp.md) for client configuration and server
+limits.
 
 TempestKeep is independent and is not affiliated with or endorsed by WeatherFlow
 or the Tempest weather platform.

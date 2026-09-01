@@ -1,7 +1,7 @@
 package main
 
-// `tempest explore` is the historical explorer TUI. Where
-// `tempest now` is one live card, explore is a scrubbable window over the whole
+// `tempestkeep explore` is the historical explorer TUI. Where
+// `tempestkeep now` is one live card, explore is a scrubbable window over the whole
 // archive: day / week / month / year views plus an all-time records board, all
 // answered by the same read-only store queries the MCP history tools use. No
 // token required: this is the archive you own, offline.
@@ -448,22 +448,22 @@ func divider2() string { return faint().Render(dividerLine(exploreWidth)) }
 
 // ---- command --------------------------------------------------------------------
 
-// cmdExplore implements `tempest explore`: an interactive, scrubbable history
+// cmdExplore implements `tempestkeep explore`: an interactive, scrubbable history
 // browser over the local archive. Archive-only by design, so no token is needed.
 func cmdExplore(args []string) (err error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	fs := flag.NewFlagSet("explore", flag.ContinueOnError)
-	describe(fs, "tempest explore: browse the archive interactively: day, week, month, year,\nand all-time-records views; scrub back through history with ←/→.",
-		"tempest explore",
-		"tempest explore --db ~/weather/tempest.sqlite")
+	describe(fs, "tempestkeep explore: browse the archive interactively: day, week, month, year,\nand all-time-records views; scrub back through history with ←/→.",
+		"tempestkeep explore",
+		"tempestkeep explore --db ~/weather/tempest.sqlite")
 	db := fs.String("db", "", "path to the tempest.sqlite archive (or env TEMPEST_DB)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if !isTTY(os.Stdout) {
 		// A full-screen TUI would write control sequences into a pipe.
-		return errors.New("explore is interactive and needs a terminal; for scriptable output use `tempest stats` or `tempest export`")
+		return errors.New("explore is interactive and needs a terminal; for scriptable output use `tempestkeep stats` or `tempestkeep export`")
 	}
 	if err := config.LoadDotenv(ctx, ".env"); err != nil {
 		return err
@@ -474,7 +474,7 @@ func cmdExplore(args []string) (err error) {
 		return err
 	}
 	if dbPath == "" {
-		return fmt.Errorf("no archive configured: set --db/TEMPEST_DB, or run `tempest setup`")
+		return fmt.Errorf("no archive configured: set --db/TEMPEST_DB, or run `tempestkeep setup`")
 	}
 	st, err := store.Open(ctx, dbPath)
 	if err != nil {
@@ -487,7 +487,7 @@ func cmdExplore(args []string) (err error) {
 		return err
 	}
 	if cov.Count == 0 {
-		return fmt.Errorf("archive is empty; run `tempest collect` first")
+		return fmt.Errorf("archive is empty; run `tempestkeep collect` first")
 	}
 
 	p := tea.NewProgram(newExploreModel(st, cov), tea.WithAltScreen(), tea.WithContext(ctx))

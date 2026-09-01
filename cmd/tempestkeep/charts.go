@@ -1,6 +1,6 @@
 package main
 
-// Chart primitives for `tempest explore`. Everything renders with the
+// Chart primitives for `tempestkeep explore`. Everything renders with the
 // eighth-block glyphs (▁▂▃▄▅▆▇█), which every modern monospaced font carries,
 // so the explorer needs no plotting dependency and no NerdFont. Values are
 // nullable (*float64) throughout because archive days can be partial: a nil

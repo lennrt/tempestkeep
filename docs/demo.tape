@@ -24,18 +24,18 @@ Type "# TempestKeep: a local weather archive with CLI and MCP access"
 Enter
 Sleep 2.5
 
-Type "tempest collect --no-backup   # first run: collect available history"
+Type "tempestkeep collect --no-backup   # first run: collect available history"
 Enter
 Sleep 9
 
-Type "tempest now --once   # live conditions, wttr.in-style"
+Type "tempestkeep now --once   # live conditions, wttr.in-style"
 Enter
 Sleep 6
 
 Type "# the same archive, served to agents over MCP: one binary, 29 tools"
 Enter
 Sleep 1
-Type `cat mcp.jsonl | tempest-mcp 2>/dev/null | grep -oE '"name":"[a-z_]+"' | cut -d'"' -f4 | pr -3 -t -w 66`
+Type `cat mcp.jsonl | tempestkeep mcp 2>/dev/null | grep -oE '"name":"[a-z_]+"' | cut -d'"' -f4 | pr -3 -t -w 66`
 Enter
 Sleep 5
 

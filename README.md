@@ -2,11 +2,9 @@
 
 # TempestKeep
 
-TempestKeep reads WeatherFlow Tempest data. It provides:
-
-- `tempest`, a setup, collection, export, report, and terminal application;
-- `tempest-mcp`, an MCP server for live and archived weather data; and
-- a local SQLite archive of one-minute observations.
+TempestKeep reads WeatherFlow Tempest data. The `tempestkeep` command provides
+setup, collection, export, reports, terminal views, and an MCP stdio server. It
+stores one-minute observations in a local SQLite archive.
 
 The archive stays on the local machine. TempestKeep sends authenticated read
 requests to the WeatherFlow REST API when a live operation or collection needs
@@ -23,7 +21,7 @@ toolchain.
 
 ## Quickstart
 
-Check the toolchain and build both commands:
+Check the toolchain and build the command:
 
 ```sh
 go version
@@ -31,12 +29,14 @@ go version
 
 go mod download
 make build
+export PATH="$PWD/bin:$PATH"
 ```
 
-Run the setup wizard:
+Keep the directory that contains `tempestkeep` on `PATH` when the MCP client
+starts. Then run the setup wizard:
 
 ```sh
-./bin/tempest setup
+tempestkeep setup
 ```
 
 The wizard validates the token, selects an archive path, and prints MCP setup
@@ -48,8 +48,8 @@ the file to the current user:
 ```sh
 cp .env.example .env
 chmod 600 .env
-./bin/tempest list-devices
-./bin/tempest collect
+./bin/tempestkeep list-devices
+./bin/tempestkeep collect
 ```
 
 Do not put a token on a command line. Command lines can be retained in shell
@@ -58,21 +58,22 @@ history and process diagnostics. Rotate a token after any exposure.
 ## Main commands
 
 ```text
-tempest setup          Configure the token and archive.
-tempest list-devices   List stations and device identifiers.
-tempest collect        Create or update the archive.
-tempest now            Show current conditions and forecast.
-tempest explore        Explore archived days, months, and records.
-tempest stats          Print archive statistics.
-tempest export         Write CSV or JSON Lines to stdout.
-tempest version        Print the installed version.
-tempest help           Show command help.
+tempestkeep setup          Configure the token and archive.
+tempestkeep list-devices   List stations and device identifiers.
+tempestkeep collect        Create or update the archive.
+tempestkeep now            Show current conditions and forecast.
+tempestkeep explore        Explore archived days, months, and records.
+tempestkeep stats          Print archive statistics.
+tempestkeep export         Write CSV or JSON Lines to stdout.
+tempestkeep mcp            Serve live and archived data over MCP stdio.
+tempestkeep version        Print the installed version.
+tempestkeep help           Show command help.
 ```
 
-Use `tempest help <command>` for flags, bounds, results, and failure behavior.
+Use `tempestkeep help <command>` for flags, bounds, results, and failure behavior.
 Machine-readable commands keep data on stdout and diagnostics on stderr.
 
-![The current tempest terminal dashboard](docs/tempest-now.svg)
+![The current TempestKeep terminal dashboard](docs/tempest-now.svg)
 
 ## Archive behavior
 
@@ -84,10 +85,10 @@ one transaction. Observation inserts use the `(device_id, epoch)` key, so replay
 does not create duplicate rows. Open-ended collection stores a cursor after each
 committed chunk and resumes from that cursor after interruption.
 
-The default `tempest collect` run creates a timestamped backup after a successful
-checkpoint. A backup is first copied to a private temporary file and then linked
-into place without overwriting an existing snapshot. Set `--backup-keep` from 0
-through 365. A value of 0 disables backups.
+The default `tempestkeep collect` run creates a timestamped backup after a
+successful checkpoint. A backup is first copied to a private temporary file and
+then linked into place without overwriting an existing snapshot. Set
+`--backup-keep` from 0 through 365. A value of 0 disables backups.
 
 Keep the active database on a local filesystem. Stop writers before copying the
 database. Move a completed backup or export between machines. Do not place an
@@ -103,7 +104,7 @@ different timezone.
 Run the server over stdio:
 
 ```sh
-./bin/tempest-mcp --db ./tempest.sqlite
+./bin/tempestkeep mcp --db ./tempest.sqlite
 ```
 
 Pass `TEMPEST_TOKEN` and `TEMPEST_DB` through the MCP client's environment
@@ -121,8 +122,8 @@ Use `--read-only` or `TEMPEST_READ_ONLY=true` to remove archive write tools.
 MCP stdout carries JSON-RPC only. Diagnostics use stderr and omit credentials,
 archive paths, raw identifiers, and response payloads.
 
-The optional package under `plugin/` connects `tempest-mcp` to compatible plugin
-clients. Review its metadata and installation flow before distribution.
+The optional package under `plugin/` connects `tempestkeep mcp` to Claude Code.
+Review its metadata and installation flow before distribution.
 
 ## Security and privacy
 

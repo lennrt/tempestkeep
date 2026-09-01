@@ -59,10 +59,13 @@ func TestMCPRegistrationCommandWrapsSafely(t *testing.T) {
 		if len(lines) != 1 {
 			t.Fatalf("Windows command has %d lines, want 1", len(lines))
 		}
+		if lines[0] != `claude mcp add tempestkeep -- tempestkeep mcp --db "/tmp/weather archive/tempest.sqlite"` {
+			t.Fatalf("registration command = %#v", lines)
+		}
 		return
 	}
-	if len(lines) != 3 || lines[0] != `claude mcp add tempest \` ||
-		lines[1] != `  -- tempest-mcp \` ||
+	if len(lines) != 3 || lines[0] != `claude mcp add tempestkeep \` ||
+		lines[1] != `  -- tempestkeep mcp \` ||
 		lines[2] != `  --db '/tmp/weather archive/tempest.sqlite'` {
 		t.Fatalf("registration command = %#v", lines)
 	}

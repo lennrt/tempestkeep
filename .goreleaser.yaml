@@ -3,18 +3,9 @@
 version: 2
 
 builds:
-  - id: tempest-mcp
-    main: ./cmd/tempest-mcp
-    binary: tempest-mcp
-    env: [CGO_ENABLED=0]
-    goos: [linux, darwin, windows]
-    goarch: [amd64, arm64]
-    ldflags:
-      - -s -w
-      - -X github.com/lennrt/tempestkeep/internal/version.version={{.Version}}
-  - id: tempest
-    main: ./cmd/tempest
-    binary: tempest
+  - id: tempestkeep
+    main: ./cmd/tempestkeep
+    binary: tempestkeep
     env: [CGO_ENABLED=0]
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
@@ -24,7 +15,7 @@ builds:
 
 archives:
   - id: default
-    ids: [tempest-mcp, tempest]
+    ids: [tempestkeep]
     name_template: "tempestkeep_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:

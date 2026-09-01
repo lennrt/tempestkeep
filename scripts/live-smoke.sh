@@ -22,16 +22,16 @@ umask 077
 export TEMPEST_API_BASE="https://swd.weatherflow.com/swd/rest"
 
 make check-go build
-./bin/tempest list-devices --format json >/dev/null
-./bin/tempest now --format json >/dev/null
-./bin/tempest now --forecast --hours 1 --days 1 --format json >/dev/null
+./bin/tempestkeep list-devices --format json >/dev/null
+./bin/tempestkeep now --format json >/dev/null
+./bin/tempestkeep now --forecast --hours 1 --days 1 --format json >/dev/null
 
 start_date=$(date -u +%F)
-./bin/tempest collect \
+./bin/tempestkeep collect \
 	--db "$archive_path" \
 	--backfill-start "$start_date" \
 	--throttle-ms 0 \
 	--no-backup \
 	--quiet
 
-TEMPEST_TOKEN= ./bin/tempest now --db "$archive_path" --format json >/dev/null
+TEMPEST_TOKEN= ./bin/tempestkeep now --db "$archive_path" --format json >/dev/null

@@ -1,13 +1,14 @@
-// Command tempest reads a WeatherFlow Tempest station and maintains a local
+// Command tempestkeep reads a WeatherFlow Tempest station and maintains a local
 // SQLite archive.
 //
-//	tempest now                 live, auto-refreshing dashboard (wttr.in-style)
-//	tempest now --once          render one frame and exit (pipe-friendly)
-//	tempest explore             scrub through the archive: day/week/month/year/records
-//	tempest stats               print a one-shot climate summary of the archive
-//	tempest collect             build/refresh the local archive (sync or backfill)
-//	tempest export              stream a date range to CSV or JSON Lines on stdout
-//	tempest list-devices        show the stations/devices your token can access
+//	tempestkeep now                 live, auto-refreshing dashboard (wttr.in-style)
+//	tempestkeep now --once          render one frame and exit (pipe-friendly)
+//	tempestkeep explore             scrub through the archive: day/week/month/year/records
+//	tempestkeep stats               print a one-shot climate summary of the archive
+//	tempestkeep collect             build/refresh the local archive (sync or backfill)
+//	tempestkeep export              stream a date range to CSV or JSON Lines on stdout
+//	tempestkeep list-devices        show the stations/devices your token can access
+//	tempestkeep mcp                 serve live and archived data over MCP stdio
 //
 // Read TEMPEST_TOKEN from the process environment or a private .env file.
 // Other settings can also come from flags.
@@ -34,7 +35,7 @@ func main() {
 	args, noColor := stripNoColor(os.Args[1:])
 	if noColor {
 		if err := os.Setenv("NO_COLOR", "1"); err != nil {
-			fmt.Fprintf(os.Stderr, "tempest: disable color: %v\n", err)
+			fmt.Fprintf(os.Stderr, "tempestkeep: disable color: %v\n", err)
 			os.Exit(1)
 		}
 	}
@@ -47,10 +48,10 @@ func main() {
 	var err error
 	switch cmd := args[0]; cmd {
 	case "version", "-v", "--version":
-		fmt.Printf("tempest %s\n", version.String())
+		fmt.Printf("tempestkeep %s\n", version.String())
 	case "help", "-h", "--help":
 		if len(args) > 1 {
-			// `tempest help <cmd>` is `tempest <cmd> -h`.
+			// `tempestkeep help <cmd>` is `tempestkeep <cmd> -h`.
 			if run, ok := commands[args[1]]; ok {
 				err = run([]string{"-h"})
 				break
@@ -73,7 +74,7 @@ func main() {
 	case errors.Is(err, errUsageShown):
 		os.Exit(2) // the flag package already printed the parse error and usage
 	default:
-		fmt.Fprintf(os.Stderr, "tempest: %v\n", err)
+		fmt.Fprintf(os.Stderr, "tempestkeep: %v\n", err)
 		if isUsageErr(err) {
 			os.Exit(2) // bad invocation, not a runtime failure
 		}
@@ -90,13 +91,14 @@ var commands = map[string]func([]string) error{
 	"export":       cmdExport,
 	"stats":        cmdStats,
 	"list-devices": cmdListDevices,
+	"mcp":          cmdMCP,
 }
 
 // unknownCommand suggests a near match. It never runs the suggested command.
 func unknownCommand(cmd string) {
-	fmt.Fprintf(os.Stderr, "tempest: unknown command %q\n", cmd)
+	fmt.Fprintf(os.Stderr, "tempestkeep: unknown command %q\n", cmd)
 	if s := closestCommand(cmd); s != "" {
-		fmt.Fprintf(os.Stderr, "did you mean %q? See 'tempest help'.\n", s)
+		fmt.Fprintf(os.Stderr, "did you mean %q? See 'tempestkeep help'.\n", s)
 	} else {
 		fmt.Fprintln(os.Stderr)
 		usage(os.Stderr)
@@ -165,7 +167,7 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 		return flag.ErrHelp
 	default:
 		fs.SetOutput(os.Stderr)
-		fmt.Fprintf(os.Stderr, "tempest %s: %v\n\n", fs.Name(), err)
+		fmt.Fprintf(os.Stderr, "tempestkeep %s: %v\n\n", fs.Name(), err)
 		fs.Usage()
 		return errUsageShown
 	}
@@ -291,7 +293,7 @@ func usage(w io.Writer) {
 Read live Tempest data and maintain one local archive.
 
 Usage:
-  tempest <command> [flags]
+  tempestkeep <command> [flags]
 
 Start
   setup          configure a token, archive, and MCP client
@@ -305,10 +307,11 @@ Archive
 
 Utilities
   list-devices   list stations and device IDs visible to the token
+  mcp            serve live and archived data over MCP stdio
   version        print the installed version
   help           show this page or help for one command
 
-Run 'tempest help <command>' for flags and examples.
+Run 'tempestkeep help <command>' for flags and examples.
 
 Global flag:
   --no-color     disable ANSI color (also honors NO_COLOR and TERM=dumb)

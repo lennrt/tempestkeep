@@ -1,6 +1,6 @@
 package main
 
-// `tempest stats` prints a one-shot climate summary of the local archive: its
+// `tempestkeep stats` prints a one-shot climate summary of the local archive: its
 // coverage, all-time records, the warming/cooling trend, and the rain, wind,
 // lightning, solar, and comfort highlights over a date range. It is the CLI
 // surface for the analytics the MCP server exposes as tools, rendered as plain
@@ -24,7 +24,7 @@ import (
 	"github.com/lennrt/tempestkeep/pkg/tempest/store"
 )
 
-// statsReport bundles the archive analytics that `tempest stats` renders, all in
+// statsReport bundles the archive analytics that `tempestkeep stats` renders, all in
 // US display units (the store converts at the edge).
 type statsReport struct {
 	cov      store.Coverage
@@ -43,10 +43,10 @@ func cmdStats(args []string) (err error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
-	describe(fs, "tempest stats: one-shot climate summary of the archive (coverage, records,\ntrend, and rain/wind/lightning/solar/comfort highlights). --format json for scripting.",
-		"tempest stats",
-		"tempest stats --start 2024-01-01 --end 2024-12-31",
-		"tempest stats --format json | jq .records")
+	describe(fs, "tempestkeep stats: one-shot climate summary of the archive (coverage, records,\ntrend, and rain/wind/lightning/solar/comfort highlights). --format json for scripting.",
+		"tempestkeep stats",
+		"tempestkeep stats --start 2024-01-01 --end 2024-12-31",
+		"tempestkeep stats --format json | jq .records")
 	db := fs.String("db", "", "path to the tempest.sqlite archive (or env TEMPEST_DB)")
 	start := fs.String("start", "", "start date YYYY-MM-DD in local time (default: whole archive)")
 	end := fs.String("end", "", "end date YYYY-MM-DD in local time, inclusive (default: today)")
@@ -72,7 +72,7 @@ func cmdStats(args []string) (err error) {
 		return err
 	}
 	if dbPath == "" {
-		return fmt.Errorf("no archive configured: set --db/TEMPEST_DB, or run `tempest setup`")
+		return fmt.Errorf("no archive configured: set --db/TEMPEST_DB, or run `tempestkeep setup`")
 	}
 	st, err := store.Open(ctx, dbPath)
 	if err != nil {
@@ -94,7 +94,7 @@ func cmdStats(args []string) (err error) {
 }
 
 // statsJSON is the machine-readable shape of the report: the store analytics
-// (already US-unit and json-tagged) grouped under stable keys, so `tempest stats
+// (already US-unit and json-tagged) grouped under stable keys, so `tempestkeep stats
 // --format json | jq` is a first-class path alongside the human text.
 type statsJSON struct {
 	Coverage struct {
@@ -190,7 +190,7 @@ func writeStats(w io.Writer, r statsReport) error {
 	out.println("TempestKeep archive summary")
 	out.println("===========================")
 	if r.cov.Count == 0 || !r.cov.MinEpoch.Valid {
-		out.println("The archive is empty. Run `tempest collect` to build it.")
+		out.println("The archive is empty. Run `tempestkeep collect` to build it.")
 		return out.err
 	}
 	span := fmt.Sprintf("%s to %s",

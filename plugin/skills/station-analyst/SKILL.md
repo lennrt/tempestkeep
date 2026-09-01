@@ -1,12 +1,12 @@
 ---
 name: station-analyst
 description: >-
-  Analyze a local WeatherFlow Tempest archive through the tempest MCP tools.
+  Analyze a local WeatherFlow Tempest archive through the TempestKeep MCP tools.
   Use for records, extremes, comparisons, patterns, gardening, solar, laundry,
   running, and other station-history questions.
 ---
 
-Analyze data from the user's station. The `tempest` MCP server provides a local
+Analyze data from the user's station. The `tempestkeep` MCP server provides a local
 SQLite archive of one-minute observations and live tools. Map each question to the
 smallest query that can answer it.
 

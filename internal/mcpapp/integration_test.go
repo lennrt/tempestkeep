@@ -1,4 +1,4 @@
-package main
+package mcpapp
 
 import (
 	"context"
@@ -72,7 +72,7 @@ func connectArchiveServer(t *testing.T, ctx context.Context, dbPath string) *mcp
 	}
 	closeOnCleanup(t, st)
 
-	srv := mcp.NewServer(&mcp.Implementation{Name: "tempest-mcp", Version: "test"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "tempestkeep", Version: "test"}, nil)
 	registerTools(srv, nil, st) // live=nil -> archive-only
 
 	clientT, serverT := mcp.NewInMemoryTransports()
