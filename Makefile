@@ -14,7 +14,7 @@ GO_LICENSES_VERSION := v1.6.0
 CYCLONEDX_GOMOD_VERSION := v1.12.0
 GORELEASER_VERSION := v2.18.0
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION ?= $(shell git describe --tags --dirty --match 'v[0-9]*' 2>/dev/null || printf 'v%s-dev' "$$(cat internal/version/VERSION)")
 LDFLAGS := -ldflags "-X github.com/lennrt/tempestkeep/internal/version.version=$(VERSION)"
 
 .PHONY: all check-go download tidy tidy-check update-deps build build-pure build-arm64 vet fmt fmtcheck docs-check lint workflows vuln test integration e2e live-smoke race fuzz bench cover api-check api-update generated licenses sbom secrets verify tempestkeep demoapi agentdemo demo demo-setup demo-agent demo-explore vhs release-check hooks clean

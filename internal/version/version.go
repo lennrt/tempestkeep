@@ -1,7 +1,11 @@
 // Package version reports the TempestKeep build version.
 package version
 
-import "runtime/debug"
+import (
+	_ "embed"
+	"runtime/debug"
+	"strings"
+)
 
 // version is injected at build time via
 //
@@ -10,8 +14,12 @@ import "runtime/debug"
 // (the Makefile and goreleaser both do this). A plain `go build` leaves it empty.
 var version string
 
+//go:embed VERSION
+var releaseVersion string
+
 // String returns the best available version: the ldflags-injected one, else the
-// module version stamped by `go install module@version`, else "dev".
+// module version stamped by `go install module@version`, else the next release
+// with a "-dev" suffix.
 func String() string {
 	if version != "" {
 		return version
@@ -19,5 +27,5 @@ func String() string {
 	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
 		return bi.Main.Version
 	}
-	return "dev"
+	return "v" + strings.TrimSpace(releaseVersion) + "-dev"
 }

@@ -19,8 +19,11 @@ const nowMinWidth = contentWidth + 2 + 4
 
 // narrowNotice replaces a card that would wrap in a narrow terminal.
 func narrowNotice(have, need int) string {
-	return faint().Width(have).Render(
-		fmt.Sprintf("Terminal is %d columns wide; widen to at least %d for the dashboard.", have, need))
+	if have <= 0 {
+		return ""
+	}
+	return faint().Width(have).MaxWidth(have).Render(
+		fmt.Sprintf("Terminal is %d columns wide; widen to at least %d for the dashboard. Press q to quit.", have, need))
 }
 
 // dashboard contains the data needed by both live and archive views.
@@ -154,23 +157,27 @@ func buildArchiveDashboard(station string, o *model.Obs) dashboard {
 func renderDashboard(d dashboard, now time.Time, footer string) string {
 	art := artFor(d.icon, d.conditions)
 	accent := lipgloss.Color(art.accent)
+	picture := artBlock(art)
+	infoWidth := max(contentWidth-lipgloss.Width(picture)-2, 1)
+	info := lipgloss.NewStyle().Width(infoWidth).MaxWidth(infoWidth).Render(infoBlock(d, accent))
 
 	sections := []string{
 		header(d, now),
 		divider(),
-		lipgloss.JoinHorizontal(lipgloss.Top, artBlock(art), "  ", infoBlock(d, accent)),
+		lipgloss.JoinHorizontal(lipgloss.Top, picture, "  ", info),
 	}
 	if len(d.daily) > 0 {
 		sections = append(sections, divider(), forecastStrip(d.daily))
 	}
 	if d.note != "" {
-		sections = append(sections, faint().Width(contentWidth).Render(d.note))
+		sections = append(sections, faint().Width(contentWidth).MaxWidth(contentWidth).Render(displayText(d.note)))
 	}
 	if footer != "" {
-		sections = append(sections, divider(), faint().Render(footer))
+		sections = append(sections, divider(), faint().Width(contentWidth).MaxWidth(contentWidth).Render(footer))
 	}
 
-	card := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	card := lipgloss.NewStyle().Width(contentWidth).MaxWidth(contentWidth).
+		Render(lipgloss.JoinVertical(lipgloss.Left, sections...))
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(accent).
@@ -179,7 +186,7 @@ func renderDashboard(d dashboard, now time.Time, footer string) string {
 }
 
 func header(d dashboard, now time.Time) string {
-	name := d.station
+	name := displayText(d.station)
 	if name == "" {
 		name = "Tempest"
 	}
@@ -199,7 +206,7 @@ func header(d dashboard, now time.Time) string {
 func infoBlock(d dashboard, accent lipgloss.Color) string {
 	bold := lipgloss.NewStyle().Bold(true)
 
-	conditions := d.conditions
+	conditions := displayText(d.conditions)
 	if conditions == "" {
 		conditions = capitalize(d.source) + " reading"
 	}
@@ -254,9 +261,17 @@ func artBlock(a weatherArt) string {
 
 // forecastStrip lays the daily cells out as equal-width columns.
 func forecastStrip(cells []dailyCell) string {
-	cellW := contentWidth / len(cells)
+	if len(cells) == 0 {
+		return ""
+	}
+	cells = cells[:min(len(cells), 5)]
+	baseWidth, extra := contentWidth/len(cells), contentWidth%len(cells)
 	rendered := make([]string, 0, len(cells))
-	for _, c := range cells {
+	for i, c := range cells {
+		cellW := baseWidth
+		if i < extra {
+			cellW++
+		}
 		hilo := "  --  "
 		if c.hiF != nil && c.loF != nil {
 			hi := lipgloss.NewStyle().Foreground(tempColor(*c.hiF)).Render(fmt.Sprintf("%.0f°", *c.hiF))
@@ -264,11 +279,11 @@ func forecastStrip(cells []dailyCell) string {
 			hilo = hi + "/" + lo
 		}
 		body := lipgloss.JoinVertical(lipgloss.Center,
-			faint().Render(c.label),
+			faint().Render(fitLine(displayText(c.label), cellW)),
 			padGlyph(c.icon),
 			hilo,
 		)
-		rendered = append(rendered, lipgloss.NewStyle().Width(cellW).Align(lipgloss.Center).Render(body))
+		rendered = append(rendered, lipgloss.NewStyle().Width(cellW).MaxWidth(cellW).Align(lipgloss.Center).Render(body))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 }
@@ -283,7 +298,16 @@ func dividerLine(w int) string { return strings.Repeat("─", w) }
 
 // spread places left and right on one line separated to fill width.
 func spread(left, right string, width int) string {
-	gap := max(width-lipgloss.Width(left)-lipgloss.Width(right), 1)
+	if width <= 0 {
+		return ""
+	}
+	right = fitLine(right, width)
+	leftWidth := width
+	if right != "" {
+		leftWidth = max(width-lipgloss.Width(right)-1, 0)
+	}
+	left = fitLine(left, leftWidth)
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
 	return left + strings.Repeat(" ", gap) + right
 }
 

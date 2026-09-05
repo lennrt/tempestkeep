@@ -2,6 +2,13 @@
 
 # TempestKeep
 
+[![Development version][version-badge]](CHANGELOG.md)
+[![CI][ci-b]][ci]
+[![License][license-badge]](LICENSE)
+[![Go version][go-badge]][go-install]
+[![Go Reference][docs-badge]][go-docs]
+[![GitHub stars][stars-badge]][stars]
+
 TempestKeep reads WeatherFlow Tempest data. The `tempestkeep` command provides
 setup, collection, export, reports, terminal views, and an MCP stdio server. It
 stores one-minute observations in a local SQLite archive.
@@ -74,6 +81,21 @@ Use `tempestkeep help <command>` for flags, bounds, results, and failure behavio
 Machine-readable commands keep data on stdout and diagnostics on stderr.
 
 ![The current TempestKeep terminal dashboard](docs/tempest-now.svg)
+
+## Terminal controls
+
+The current-conditions card needs 61 columns; the explorer needs 68. Narrower
+windows show a resize notice rather than a broken border. On short terminals,
+use **Up/Down** (or **k/j**) and **Page Up/Page Down** to scroll. A position hint
+appears when content extends beyond the screen. Resizing returns to the top.
+
+In `now`, **r** refreshes or retries. In `explore`, **Enter** refreshes or retries,
+**Left/Right** (or **h/l**) scrubs periods, **d/w/m/y/r** selects a view, **Tab**
+cycles the month/year metric, and **g/Home** returns to the latest period.
+**q**, **Esc**, and **Ctrl+C** exit either dashboard.
+
+Source builds without release metadata identify as `v0.2.0-dev`. See
+[CHANGELOG.md](CHANGELOG.md) for the pending minor-version changes.
 
 ## Archive behavior
 
@@ -204,3 +226,14 @@ Tempest names and marks belong to their respective owners. See [NOTICE.md](NOTIC
 ## License
 
 TempestKeep uses the MIT License. See [LICENSE](LICENSE).
+
+[version-badge]: https://img.shields.io/badge/development-v0.2.0--dev-blue
+[ci-b]: https://img.shields.io/github/actions/workflow/status/lennrt/tempestkeep/ci.yml?branch=main
+[ci]: https://github.com/lennrt/tempestkeep/actions/workflows/ci.yml
+[license-badge]: https://img.shields.io/github/license/lennrt/tempestkeep
+[go-badge]: https://img.shields.io/github/go-mod/go-version/lennrt/tempestkeep
+[go-install]: https://go.dev/doc/install
+[docs-badge]: https://img.shields.io/badge/Go-reference-00ADD8?logo=go&logoColor=white
+[go-docs]: https://pkg.go.dev/github.com/lennrt/tempestkeep
+[stars-badge]: https://img.shields.io/github/stars/lennrt/tempestkeep?style=flat
+[stars]: https://github.com/lennrt/tempestkeep/stargazers

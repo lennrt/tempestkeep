@@ -183,6 +183,7 @@ type nowModel struct {
 	lastFetch time.Time
 	width     int
 	height    int
+	scroll    int
 
 	spin      spinner.Model
 	spring    harmonica.Spring
@@ -226,6 +227,10 @@ func tick(d time.Duration) tea.Cmd {
 func (m nowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if offset, ok := scrollOffset(msg.String(), m.scroll, lineCount(m.body()), m.height); ok {
+			m.scroll = offset
+			return m, nil
+		}
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
@@ -238,6 +243,7 @@ func (m nowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.scroll = 0
 	case fetchedMsg:
 		m.loading = false
 		m.lastFetch = time.Now()
@@ -268,14 +274,20 @@ func (m nowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m nowModel) View() string {
+	return terminalFrame(m.body(), m.width, m.height, m.scroll)
+}
+
+func (m nowModel) body() string {
 	var body string
 	switch {
+	case m.width > 0 && m.width < nowMinWidth:
+		body = narrowNotice(m.width, nowMinWidth)
 	case !m.haveData && m.err != nil:
-		body = errorCard(m.err)
+		body = lipgloss.JoinVertical(lipgloss.Center, errorCard(m.err), faint().Render("r retry · q quit"))
 	case !m.haveData:
 		// Splash: the wordmark settles in on a spring while the spinner
 		// waits for the first frame of data.
-		drop := int(m.splashPos + 0.5)
+		drop := max(int(m.splashPos+0.5), 0)
 		// Archive-only mode never touches the network, so don't claim to be
 		// contacting the station (mirrors explore's "reading your archive…").
 		wait := " contacting your station…"
@@ -288,13 +300,11 @@ func (m nowModel) View() string {
 				"",
 				m.spin.View()+faint().Render(wait),
 			))
-	case m.width > 0 && m.width < nowMinWidth:
-		body = narrowNotice(m.width, nowMinWidth)
+		if m.height > 0 && lipgloss.Height(body) > m.height {
+			body = m.spin.View() + faint().Render(wait)
+		}
 	default:
 		body = renderDashboard(m.d, time.Now(), m.footer())
-	}
-	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, body)
 	}
 	return body
 }
@@ -317,9 +327,10 @@ func errorCard(err error) string {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#E63946")).
-		Padding(1, 3).
-		Render(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E63946")).Render("Couldn't load Tempest data") +
-			"\n" + faint().Render(err.Error()))
+		Padding(1, 2).
+		Render(lipgloss.NewStyle().Width(contentWidth).MaxWidth(contentWidth).Render(
+			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E63946")).Render("Couldn't load Tempest data") +
+				"\n" + faint().Render(displayText(err.Error()))))
 }
 
 // ---- command ----------------------------------------------------------------
@@ -437,19 +448,19 @@ func resolveNowConfig(ctx context.Context, dbFlag string) (nowConfig, error) {
 	}
 
 	var cfg nowConfig
-	if dbPath != "" {
-		s, err := store.Open(ctx, dbPath)
-		if err != nil {
-			return cfg, fmt.Errorf("open configured archive: %w", err)
-		}
-		cfg.store = s
-	}
 	if token != "" {
 		client, err := newAPIClient(token)
 		if err != nil {
 			return cfg, err
 		}
 		cfg.live = &nowLiveSource{client: client}
+	}
+	if dbPath != "" {
+		s, err := store.Open(ctx, dbPath)
+		if err != nil {
+			return cfg, fmt.Errorf("open configured archive: %w", err)
+		}
+		cfg.store = s
 	}
 	if cfg.live == nil && cfg.store == nil {
 		return cfg, fmt.Errorf("no data source: run `tempestkeep setup`, set TEMPEST_TOKEN, or set --db/TEMPEST_DB")

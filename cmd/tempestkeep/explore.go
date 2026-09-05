@@ -92,6 +92,7 @@ type exploreModel struct {
 	err     error
 
 	width, height int
+	scroll        int
 	spin          spinner.Model
 }
 
@@ -123,6 +124,7 @@ func (m exploreModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.scroll = 0
 	case exploreDataMsg:
 		if msg.gen != m.gen {
 			return m, nil // a newer fetch is already in flight
@@ -139,9 +141,19 @@ func (m exploreModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m exploreModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if offset, ok := scrollOffset(msg.String(), m.scroll, lineCount(m.body()), m.height); ok {
+		m.scroll = offset
+		return m, nil
+	}
 	switch msg.String() {
 	case "q", "ctrl+c", "esc":
 		return m, tea.Quit
+
+	case "enter":
+		if m.loading {
+			return m, nil
+		}
+		return m.refetch()
 
 	case "left", "h":
 		return m.scrub(+1)
@@ -198,6 +210,11 @@ func (m exploreModel) switchView(v exploreView) (tea.Model, tea.Cmd) {
 func (m exploreModel) refetch() (tea.Model, tea.Cmd) {
 	m.gen++
 	m.loading = true
+	m.err = nil
+	m.scroll = 0
+	// Never attach the previous period's data to the new view or calendar.
+	_, _, label := periodRange(m.view, m.offset, time.Now())
+	m.data = exploreData{label: label}
 	return m, m.fetch()
 }
 
@@ -336,21 +353,25 @@ func loadExplore(ctx context.Context, st *store.Store, view exploreView, offset 
 // ---- view ----------------------------------------------------------------------
 
 func (m exploreModel) View() string {
+	return terminalFrame(m.body(), m.width, m.height, m.scroll)
+}
+
+func (m exploreModel) body() string {
 	var body string
 	switch {
+	case m.width > 0 && m.width < exploreMinWidth:
+		body = narrowNotice(m.width, exploreMinWidth)
 	case !m.haveOne && m.err != nil:
 		body = errorCard(m.err)
 	case !m.haveOne:
 		body = lipgloss.JoinVertical(lipgloss.Center,
 			splashArt(), "",
 			m.spin.View()+faint().Render(" reading your archive…"))
-	case m.width > 0 && m.width < exploreMinWidth:
-		body = narrowNotice(m.width, exploreMinWidth)
+		if m.height > 0 && lipgloss.Height(body) > m.height {
+			body = m.spin.View() + faint().Render(" reading your archive…")
+		}
 	default:
 		body = m.renderCard()
-	}
-	if m.width > 0 && m.height > 0 {
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, body)
 	}
 	return body
 }
@@ -367,13 +388,14 @@ func (m exploreModel) renderCard() string {
 		"",
 		m.bodyFor(),
 		divider2(),
-		faint().Render(m.footerHelp()),
+		faint().Width(exploreWidth).MaxWidth(exploreWidth).Render(m.footerHelp()),
 	}
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(accent).
 		Padding(1, 3).
-		Render(lipgloss.JoinVertical(lipgloss.Left, sections...))
+		Render(lipgloss.NewStyle().Width(exploreWidth).MaxWidth(exploreWidth).
+			Render(lipgloss.JoinVertical(lipgloss.Left, sections...)))
 }
 
 // tabsLine renders the view switcher, active view highlighted.
@@ -412,9 +434,13 @@ func (m exploreModel) headerLine() string {
 }
 
 func (m exploreModel) bodyFor() string {
+	if m.loading {
+		return faint().Render("Reading this view…")
+	}
 	if m.err != nil {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#E63946")).
-			Render("couldn't load this view: " + m.err.Error())
+			Width(exploreWidth).MaxWidth(exploreWidth).
+			Render("couldn't load this view: " + displayText(m.err.Error()) + "\nPress enter to retry.")
 	}
 	switch m.view {
 	case viewDay:
@@ -440,7 +466,7 @@ func (m exploreModel) footerHelp() string {
 	if m.view == viewRecords {
 		help = "d w m y r views · q quit"
 	}
-	return help
+	return help + "\nenter refresh/retry"
 }
 
 // divider2 is the explorer-width rule (the `now` card has its own width).
