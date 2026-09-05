@@ -29,7 +29,7 @@ as trusted implementations.
 | Boundary | Untrusted input | Main controls | Failure behavior |
 |---|---|---|---|
 | Environment and `.env` | Paths, token, booleans, durations, and identifiers | Size and syntax limits; private regular file; no symlink; environment wins | Reject malformed or insecure configuration |
-| WeatherFlow HTTP | Status, headers, body, JSON fields, counts, and delays | HTTPS by default; per-attempt timeout; bounded retry; body and semantic limits; field validation | Reject the complete response; return a redacted typed error |
+| WeatherFlow HTTP | Status, headers, body, JSON fields, counts, and delays | TLS 1.2+ with AEAD and certificate-key limits by default; no default-client redirects; timeouts, bounded retries, body and semantic limits | Reject the complete response; return a redacted typed error |
 | Borrowed HTTP client | Transport and proxy behavior | Explicit borrowed ownership; token and URL omitted from returned errors | Caller must trust the transport |
 | Collector | Replay, cancellation, partial progress, and concurrent calls | One operation per instance; bounded chunks; transactional insert; persisted cursor; idempotent key | Keep committed chunks; return a resume point and error |
 | SQLite file | Symlink, replacement race, invalid schema, mixed devices, and hostile SQL data | Regular-file and identity checks; one-device binding; validated observations; read-only handle | Fail closed without creating a read archive |
@@ -50,6 +50,9 @@ outputs, not diagnostics. Treat their output as sensitive.
 
 - The WeatherFlow API uses a token query parameter. A borrowed HTTP transport,
   local proxy, or operating-system network diagnostic can observe the full URL.
+- Explicit HTTP test endpoints and borrowed clients can change the transport
+  guarantees. Use synthetic tokens for plaintext demos; preserve the default
+  security policy in custom clients that carry real credentials.
 - A process with the same operating-system privileges can read process memory,
   the archive, and permitted configuration files.
 - SQLite commits protect database consistency, but disk or filesystem failure

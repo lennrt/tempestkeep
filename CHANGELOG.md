@@ -4,6 +4,8 @@
 
 ### Added
 
+- OpenSSF Best Practices badge and criterion evidence for project 14460.
+- Documented contribution, security triage, and release-note requirements.
 - Vertical scrolling in `now` and `explore`: Up/Down or k/j for a row, and
   Page Up/Page Down for a page. A position hint appears only when needed.
 - Enter to refresh or retry an explorer view without overlapping requests.
@@ -13,6 +15,11 @@
 
 ### Fixed
 
+- Require modern TLS and certificate key sizes with the default API client;
+  return an HTTP error for redirects instead of following them. Custom HTTP
+  clients remain caller-owned security boundaries.
+- Build CI's pinned linter with Go 1.27, retain Scorecard results, and fail
+  formatting checks when the imports tool fails.
 - Bound every interactive frame to the terminal width and height, including
   loading, errors, and narrow-window notices. Keep fitting cards centered.
 - Prevent long station names, conditions, status messages, and error text from
@@ -28,6 +35,9 @@
 ### Compatibility
 
 No archive-schema, public-package API, JSON, or MCP changes. No new dependencies.
+Proxies used with the default client must provide a direct endpoint with modern
+TLS; redirects, old protocols, CBC-only servers, and undersized RSA or EC
+certificate keys are now rejected.
 Existing navigation shortcuts and the weather artwork are retained. The plugin
 manifest is prepared for version 0.2.0; no release tag or binary is published by
 these changes. Release qualification still follows [RELEASING.md](RELEASING.md).

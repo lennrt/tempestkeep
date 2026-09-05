@@ -3,6 +3,19 @@
 Keep changes small enough to review. State every public, wire, storage,
 security, or configuration effect.
 
+## Contribution process
+
+Use [GitHub Issues](https://github.com/lennrt/tempestkeep/issues) to discuss bugs
+and proposed enhancements. English reports, documentation, and code-review
+comments are welcome. Follow [SUPPORT.md](SUPPORT.md) for public reports and
+[SECURITY.md](SECURITY.md) for private vulnerability reports.
+
+Fork the repository, create a focused branch, and open a pull request against
+`main`. Complete the pull request template with the problem, compatibility
+impact, and verification results. Maintainers review the proposal, request
+changes when needed, and merge accepted work. Keep interim commits available for
+review; do not submit only a final source archive.
+
 ## Prerequisites
 
 - Go 1.27.0.
@@ -64,6 +77,11 @@ intentional.
 
 ## Tests
 
+Every major new feature must include automated tests for its behavior. A bug fix
+must include a regression test when the failure can be reproduced safely.
+Explain any exception in the pull request. The TUI changes in version 0.2.0,
+for example, include frame-bound, scroll, retry, and stale-response regressions.
+
 Each test must have a finite timeout through the test command or its context.
 Avoid fixed readiness sleeps. Use events, polling with a deadline, an injected
 clock, or a protocol canary. Clean up every resource and report cleanup errors.
@@ -71,6 +89,21 @@ clock, or a protocol canary. Clean up every resource and report cleanup errors.
 Add regression coverage for malformed input, bounds, cancellation, replay,
 concurrency, partial failure, restart, and cleanup when those cases apply. See
 `docs/testing/properties.md`.
+
+Run `go test ./... -count=1 -timeout=5m` for the standard Go test invocation.
+Use `make cover` to inspect statement coverage. Coverage does not establish
+branch coverage or prove that every important failure has been tested.
+
+## Security review
+
+Apply [the secure-development guide](docs/secure-development.md) and the
+[threat model](docs/threat-model.md) when changing a trust boundary. Use Go's
+standard cryptographic libraries rather than implementing cryptography.
+Keep `go vet`, the enabled golangci-lint analyzers, CodeQL, race checks, and
+fuzzing active. Fix findings before merging, or document a specific false
+positive beside a narrowly scoped suppression. Do not disable a check to make
+an uninvestigated finding pass. Follow [SECURITY.md](SECURITY.md) for confirmed
+static-analysis and dynamic-analysis vulnerabilities.
 
 ## Documentation
 

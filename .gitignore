@@ -13,6 +13,7 @@
 *.exe
 /bin/
 /coverage.out
+/scorecard-results.sarif
 
 # OS
 .DS_Store

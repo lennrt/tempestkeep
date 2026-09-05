@@ -56,7 +56,8 @@ fmt:
 
 fmtcheck:
 	@test -z "$$(gofmt -l .)" || { echo "gofmt is required for:"; gofmt -l .; exit 1; }
-	@test -z "$$($(GO) run golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION) -l .)" || { echo "goimports is required."; exit 1; }
+	@imports="$$($(GO) run golang.org/x/tools/cmd/goimports@$(GOIMPORTS_VERSION) -l .)" || exit $$?; \
+		test -z "$$imports" || { printf 'goimports is required for:\n%s\n' "$$imports"; exit 1; }
 
 docs-check:
 	$(GO) run ./tools/docscheck -root .
@@ -79,12 +80,13 @@ race:
 fuzz:
 	CGO_ENABLED=0 $(GO) test ./pkg/tempest/config -run '^$$' -fuzz '^FuzzDotenvValueRoundTrip$$' -fuzztime=5s -parallel=1
 	CGO_ENABLED=0 $(GO) test ./pkg/tempest/model -run '^$$' -fuzz '^FuzzDeviceObsFromRow$$' -fuzztime=5s -parallel=1
+	CGO_ENABLED=0 $(GO) test ./cmd/tempestkeep -run '^$$' -fuzz '^FuzzScrollRange$$' -fuzztime=5s -parallel=1
 
 bench:
 	$(GO) test -bench=. -benchtime=3x -run='^$$' ./pkg/tempest/store
 
 cover:
-	$(GO) test -coverprofile=coverage.out ./...
+	CGO_ENABLED=0 $(GO) test -coverprofile=coverage.out ./... -count=1 -timeout=5m
 	$(GO) tool cover -func=coverage.out
 
 lint:

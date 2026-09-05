@@ -1,7 +1,9 @@
 # Support
 
-Use GitHub Issues for reproducible bugs and focused feature requests. Use a
-private GitHub Security Advisory for a vulnerability or suspected secret leak.
+Use [GitHub Issues][issues] for reproducible bugs and focused feature requests.
+Search existing reports before opening a new one. Issues and their responses
+are public, searchable, and addressable by URL. English reports are welcome.
+Use [the private security process](SECURITY.md) for a vulnerability or secret leak.
 Do not put sensitive station data in either channel.
 
 ## Before opening an issue
@@ -27,9 +29,17 @@ token-bearing URLs.
 
 ## Scope
 
-Support is best effort. No response-time or remediation service level is
-promised. WeatherFlow availability, account permissions, host security, and MCP
+The maintainer triages public reports at least weekly and aims to acknowledge
+bugs and enhancement requests within 14 days. An acknowledgment may request
+more information, explain a limitation, or decline a proposal. Review the last
+12 months of reports when updating the OpenSSF assessment; a future response
+policy is not evidence of past responses.
+
+Support is best effort. Security reports follow [SECURITY.md](SECURITY.md).
+WeatherFlow availability, account permissions, host security, and MCP
 client behavior are outside this project's control.
 
 Bug fixes target the default branch. Support for a tagged version must be stated
 in that version's release notes.
+
+[issues]: https://github.com/lennrt/tempestkeep/issues

@@ -21,6 +21,8 @@ building, setup, collection, MCP operation, privacy, and verification.
   API, compatibility, CI, and release decisions.
 - [Single-command and Homebrew tap ADR](adr/0002-single-command-and-homebrew-tap.md):
   executable naming, MCP dispatch, and distribution decisions.
+- [OpenSSF baseline ADR](adr/0003-openssf-security-baseline.md): transport
+  defaults, CI repairs, and evidence requirements.
 
 ## Review correctness and security
 
@@ -33,6 +35,9 @@ building, setup, collection, MCP operation, privacy, and verification.
 - [Dependency license policy](license-policy.md): accepted licenses and
   checksum-bound exceptions.
 - [Security policy](../SECURITY.md): private reporting and sensitive-data rules.
+- [Secure development](secure-development.md): review principles, common
+  vulnerability classes, and cryptographic defaults.
+- [OpenSSF assessment](openssf.md): Passing criteria evidence and maintenance.
 
 ## Maintain and release
 

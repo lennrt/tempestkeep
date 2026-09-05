@@ -4,6 +4,7 @@
 
 [![Development version][version-badge]](CHANGELOG.md)
 [![CI][ci-b]][ci]
+[![OpenSSF Best Practices][best-practices-badge]][best-practices]
 [![License][license-badge]](LICENSE)
 [![Go version][go-badge]][go-install]
 [![Go Reference][docs-badge]][go-docs]
@@ -27,6 +28,13 @@ The normal build is pure Go and uses `CGO_ENABLED=0`. Race tests need a C
 toolchain.
 
 ## Quickstart
+
+Obtain the source over HTTPS:
+
+```sh
+git clone https://github.com/lennrt/tempestkeep.git
+cd tempestkeep
+```
 
 Check the toolchain and build the command:
 
@@ -217,6 +225,18 @@ records, security evidence, support policy, and release procedures. See
 - CodeQL, dependency review, and some repository security features can require
   GitHub Advanced Security for a private repository.
 
+## Contribute and report problems
+
+Use [GitHub Issues][issues] for bugs, feature requests, and public discussion.
+English reports and contributions are welcome. See [SUPPORT.md](SUPPORT.md)
+for useful diagnostics and [CONTRIBUTING.md](CONTRIBUTING.md) for the pull
+request process, coding rules, and required tests. Report vulnerabilities
+privately using [SECURITY.md](SECURITY.md).
+
+The OpenSSF badge above displays the live status of the existing project entry.
+The [OpenSSF evidence guide](docs/openssf.md) maps the Passing criteria to the
+repository's controls and records the assessment date and limits.
+
 ## Affiliation
 
 TempestKeep is an independent project. It is not affiliated with, endorsed by,
@@ -237,3 +257,6 @@ TempestKeep uses the MIT License. See [LICENSE](LICENSE).
 [go-docs]: https://pkg.go.dev/github.com/lennrt/tempestkeep
 [stars-badge]: https://img.shields.io/github/stars/lennrt/tempestkeep?style=flat
 [stars]: https://github.com/lennrt/tempestkeep/stargazers
+[best-practices-badge]: https://www.bestpractices.dev/projects/14460/badge
+[best-practices]: https://www.bestpractices.dev/en/projects/14460/passing
+[issues]: https://github.com/lennrt/tempestkeep/issues

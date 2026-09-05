@@ -194,7 +194,7 @@ func New(token string, options ...Option) (*Client, error) {
 	baseURL, _ := url.Parse(base)
 	cfg := clientConfig{
 		baseURL:        baseURL,
-		httpClient:     &http.Client{},
+		httpClient:     defaultHTTPClient(),
 		cacheTTL:       defaultCacheTTL,
 		requestTimeout: defaultRequestTimeout,
 		retry: RetryPolicy{

@@ -26,6 +26,7 @@ store any failing input in the Go fuzz corpus so the failure can be replayed.
 | P-16 | Generated public API evidence matches the source. | Added, removed, or changed exported declarations and JSON tags. | `make generated` |
 | P-17 | The production graph builds without cgo on the host and Linux ARM64. | Native dependency introduction and architecture-specific code. | `make build-pure build-arm64` |
 | P-18 | A live dashboard cancels dependent work after a required fetch fails and reports optional forecast failure. | Missing observations, stalled forecast, configured archive failure, and concurrent station resolution. | `TestNowLoadCancelsForecastAfterObservationFailure`, `TestNowLoadReportsOptionalForecastFailure`, `TestResolveNowConfigRejectsUnavailableConfiguredArchive`; `make race` |
+| P-19 | The default API transport rejects insecure TLS and never follows a redirect. | Old protocols, CBC-only servers, untrusted certificates, weak certificate keys, alternate verified chains, and every redirect status. | `TestDefaultTransportTLS`, `TestCertificateKeySizes`, `TestDefaultClientDoesNotFollowRedirects` |
 
 ## Test commands
 
