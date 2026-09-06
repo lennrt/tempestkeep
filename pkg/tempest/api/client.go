@@ -1,8 +1,9 @@
 // Package api provides a bounded WeatherFlow Tempest REST client.
 //
-// Client methods accept a context, retry transient failures, and redact the
-// token from errors. DeviceObservations performs one request for at most five
-// days. The collect package owns multi-request backfills.
+// Client methods accept a context, retry transient failures with jittered
+// exponential backoff, and never place the token, a URL, or an address in an
+// error. DeviceObservations performs one request for at most five days. The
+// collect package owns multi-request backfills.
 package api
 
 import (
@@ -12,7 +13,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -307,9 +310,9 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 	return nil
 }
 
-// fetch GETs u, retrying transient failures with exponential backoff (see
-// maxAttempts). It gives up early when the context is done, so cancellation is
-// never stalled by a backoff sleep.
+// fetch GETs u, retrying transient failures with jittered exponential backoff
+// bounded by the client's RetryPolicy. It gives up early when the context is
+// done, so cancellation is never stalled by a backoff sleep.
 func (c *Client) fetch(ctx context.Context, path, u string) ([]byte, error) {
 	for attempt := 1; ; attempt++ {
 		body, retryable, retryAfter, err := c.fetchOnce(ctx, path, u)
@@ -322,8 +325,7 @@ func (c *Client) fetch(ctx context.Context, path, u string) ([]byte, error) {
 		if !retryable || attempt >= c.retry.MaxAttempts {
 			return nil, err
 		}
-		wait := min(max(retryAfter, c.retry.BaseWait<<(attempt-1)), c.retry.MaxWait)
-		t := time.NewTimer(wait)
+		t := time.NewTimer(backoffWait(attempt, retryAfter, c.retry))
 		select {
 		case <-ctx.Done():
 			t.Stop()
@@ -333,10 +335,25 @@ func (c *Client) fetch(ctx context.Context, path, u string) ([]byte, error) {
 	}
 }
 
+// backoffWait returns the delay before attempt+1. It draws a jittered delay
+// from BaseWait through the capped exponential ceiling. Retry-After is a
+// floor up to the hard MaxWait cap, as in the original retry policy. Jitter keeps
+// many clients (or the many chunks of one backfill) from retrying a recovering
+// endpoint in lockstep. attempt is 1-based and counts the request that failed.
+func backoffWait(attempt int, retryAfter time.Duration, policy RetryPolicy) time.Duration {
+	ceiling := policy.BaseWait << (attempt - 1)
+	if ceiling <= 0 || ceiling > policy.MaxWait {
+		ceiling = policy.MaxWait
+	}
+	wait := policy.BaseWait + rand.N(ceiling-policy.BaseWait+1)
+	return min(max(wait, retryAfter), policy.MaxWait)
+}
+
 // fetchOnce performs a single GET. retryable marks failures worth another
-// attempt: network errors and 429/5xx statuses, with retryAfter carrying the
-// server's Retry-After hint when it sends one. Anything embedding the request
-// URL is passed through redactToken so the secret never reaches an error string.
+// attempt: network errors and 408/429/5xx statuses, with retryAfter carrying
+// the server's Retry-After hint when it sends one. Anything embedding the
+// request URL is passed through redactToken so hostnames, IDs, and addresses
+// never reach an error string.
 func (c *Client) fetchOnce(ctx context.Context, path, u string) (body []byte, retryable bool, retryAfter time.Duration, err error) {
 	ctx, cancel := context.WithTimeout(ctx, c.requestTimeout)
 	defer cancel()
@@ -375,7 +392,7 @@ func (c *Client) fetchOnce(ctx context.Context, path, u string) (body []byte, re
 		return body, false, 0, nil
 	case resp.StatusCode == http.StatusUnauthorized:
 		return nil, false, 0, fmt.Errorf("%w: check the Tempest token", ErrUnauthorized)
-	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+	case resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
 		retryAfter = parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
 		return nil, true, retryAfter, &HTTPError{Operation: operation(path), StatusCode: resp.StatusCode, Retryable: true}
 	default:
@@ -393,13 +410,42 @@ func parseRetryAfter(value string, now time.Time) time.Duration {
 	return 0
 }
 
-// redactToken replaces transport details with a stable error. Transport errors
-// can contain the token, station IDs, device IDs, and local endpoint names.
+// redactToken replaces a transport error with a sanitized one. *url.Error and
+// *net.OpError embed the request URL, station and device IDs, hostnames, and
+// addresses, so none of the original text survives. The one property callers
+// need in order to react sensibly, whether the failure was a timeout, is kept:
+// the result matches ErrTransport, and a timeout also matches
+// context.DeadlineExceeded and reports Timeout() == true like a net.Error.
 func (c *Client) redactToken(err error) error {
 	if err == nil {
 		return nil
 	}
-	return ErrTransport
+	var netErr net.Error
+	timeout := errors.Is(err, context.DeadlineExceeded) ||
+		(errors.As(err, &netErr) && netErr.Timeout())
+	return &transportError{timeout: timeout}
+}
+
+// transportError is the sanitized error returned by redactToken.
+type transportError struct {
+	timeout bool
+}
+
+func (e *transportError) Error() string {
+	if e.timeout {
+		return ErrTransport.Error() + ": timeout"
+	}
+	return ErrTransport.Error()
+}
+
+// Timeout reports whether the underlying failure was a deadline, mirroring
+// net.Error so existing timeout checks keep working on the sanitized error.
+func (e *transportError) Timeout() bool { return e.timeout }
+
+// Is makes errors.Is(err, ErrTransport) true for every transport failure and
+// errors.Is(err, context.DeadlineExceeded) true for timeouts.
+func (e *transportError) Is(target error) bool {
+	return target == ErrTransport || (e.timeout && target == context.DeadlineExceeded)
 }
 
 // Device is one sensor device attached to a station. device_type "ST" is a

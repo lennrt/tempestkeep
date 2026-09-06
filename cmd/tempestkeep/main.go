@@ -1,84 +1,117 @@
 // Command tempestkeep reads a WeatherFlow Tempest station and maintains a local
 // SQLite archive.
 //
-//	tempestkeep now                 live, auto-refreshing dashboard (wttr.in-style)
+//	tempestkeep setup               configure a token, archive, and MCP client
+//	tempestkeep now                 show current conditions and the forecast
 //	tempestkeep now --once          render one frame and exit (pipe-friendly)
-//	tempestkeep explore             scrub through the archive: day/week/month/year/records
-//	tempestkeep stats               print a one-shot climate summary of the archive
-//	tempestkeep collect             build/refresh the local archive (sync or backfill)
+//	tempestkeep explore             browse archived days, weeks, months, years, and records
+//	tempestkeep stats               print a climate summary of the archive (text or JSON)
+//	tempestkeep collect             build or refresh the local archive (sync or backfill)
 //	tempestkeep export              stream a date range to CSV or JSON Lines on stdout
-//	tempestkeep list-devices        show the stations/devices your token can access
+//	tempestkeep list-devices        show the stations and devices the token can access
 //	tempestkeep mcp                 serve live and archived data over MCP stdio
+//	tempestkeep version             print the installed version
+//	tempestkeep help [command]      show usage
 //
 // Read TEMPEST_TOKEN from the process environment or a private .env file.
-// Other settings can also come from flags.
+// Other settings can also come from flags; a flag overrides the environment,
+// and the environment overrides .env.
+//
+// Exit status is 0 on success, 1 for a runtime failure, and 2 for a usage
+// error. Machine-readable commands write data to stdout and diagnostics to
+// stderr.
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"reflect"
 	"strings"
+	"syscall"
 
 	"github.com/lennrt/tempestkeep/internal/version"
 	"github.com/mattn/go-isatty"
 )
 
+// Process exit statuses. They are part of the command-line contract and are
+// documented in cmd/tempestkeep/README.md.
+const (
+	exitOK      = 0
+	exitFailure = 1
+	exitUsage   = 2
+)
+
 func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// run dispatches one invocation and returns the exit status. It is the only
+// function that maps errors to statuses and it never calls os.Exit. The given
+// streams receive built-in output and dispatch diagnostics; command handlers
+// retain their own output streams.
+func run(args []string, stdout, stderr io.Writer) int {
 	// --no-color may appear anywhere on the line; strip it before dispatch and
 	// set NO_COLOR so the lipgloss/termenv default renderer drops ANSI. This sits
 	// alongside the color handling we already inherit: a non-TTY stdout, an
 	// externally-set NO_COLOR, and TERM=dumb all disable color on their own.
-	args, noColor := stripNoColor(os.Args[1:])
+	args, noColor := stripNoColor(args)
 	if noColor {
 		if err := os.Setenv("NO_COLOR", "1"); err != nil {
-			fmt.Fprintf(os.Stderr, "tempestkeep: disable color: %v\n", err)
-			os.Exit(1)
+			_, _ = fmt.Fprintf(stderr, "tempestkeep: disable color: %v\n", err)
+			return exitFailure
 		}
 	}
-
 	if len(args) == 0 {
-		usage(os.Stderr)
-		os.Exit(2)
+		usage(stderr)
+		return exitUsage
 	}
 
-	var err error
+	err := dispatch(args, stdout, stderr)
+	switch {
+	case err == nil:
+		return exitOK
+	case errors.Is(err, flag.ErrHelp):
+		return exitOK // -h already printed the flag usage; asking for help is not a failure
+	case errors.Is(err, errUsageShown):
+		return exitUsage // the parse error and usage were already written
+	default:
+		_, _ = fmt.Fprintf(stderr, "tempestkeep: %v\n", err)
+		if isUsageErr(err) {
+			return exitUsage // bad invocation, not a runtime failure
+		}
+		return exitFailure
+	}
+}
+
+// dispatch runs the named command. Built-in commands (version, help) write to
+// the given streams; registered commands own their own output.
+func dispatch(args []string, stdout, stderr io.Writer) error {
 	switch cmd := args[0]; cmd {
 	case "version", "-v", "--version":
-		fmt.Printf("tempestkeep %s\n", version.String())
+		_, err := fmt.Fprintf(stdout, "tempestkeep %s\n", version.String())
+		return err
 	case "help", "-h", "--help":
 		if len(args) > 1 {
 			// `tempestkeep help <cmd>` is `tempestkeep <cmd> -h`.
-			if run, ok := commands[args[1]]; ok {
-				err = run([]string{"-h"})
-				break
+			handler, ok := commands[args[1]]
+			if !ok {
+				return unknownCommand(args[1], stderr)
 			}
-			unknownCommand(args[1])
+			return handler([]string{"-h"})
 		}
-		usage(os.Stdout) // an explicit help request is a success; write it to stdout
+		usage(stdout) // an explicit help request is a success; write it to stdout
+		return nil
 	default:
-		run, ok := commands[cmd]
+		handler, ok := commands[cmd]
 		if !ok {
-			unknownCommand(cmd)
+			return unknownCommand(cmd, stderr)
 		}
-		err = run(args[1:])
-	}
-
-	switch {
-	case err == nil:
-	case errors.Is(err, flag.ErrHelp):
-		os.Exit(0) // -h already printed the flag usage; asking for help is not a failure
-	case errors.Is(err, errUsageShown):
-		os.Exit(2) // the flag package already printed the parse error and usage
-	default:
-		fmt.Fprintf(os.Stderr, "tempestkeep: %v\n", err)
-		if isUsageErr(err) {
-			os.Exit(2) // bad invocation, not a runtime failure
-		}
-		os.Exit(1)
+		return handler(args[1:])
 	}
 }
 
@@ -94,16 +127,17 @@ var commands = map[string]func([]string) error{
 	"mcp":          cmdMCP,
 }
 
-// unknownCommand suggests a near match. It never runs the suggested command.
-func unknownCommand(cmd string) {
-	fmt.Fprintf(os.Stderr, "tempestkeep: unknown command %q\n", cmd)
+// unknownCommand reports an unknown command as a usage error (exit status 2).
+// A near match is suggested but never run. Without a near match the full
+// usage page is written to stderr and errUsageShown tells run not to print
+// anything further.
+func unknownCommand(cmd string, stderr io.Writer) error {
 	if s := closestCommand(cmd); s != "" {
-		fmt.Fprintf(os.Stderr, "did you mean %q? See 'tempestkeep help'.\n", s)
-	} else {
-		fmt.Fprintln(os.Stderr)
-		usage(os.Stderr)
+		return usagef("unknown command %q (did you mean %q? See 'tempestkeep help')", cmd, s)
 	}
-	os.Exit(2)
+	_, _ = fmt.Fprintf(stderr, "tempestkeep: unknown command %q\n\n", cmd)
+	usage(stderr)
+	return errUsageShown
 }
 
 // closestCommand returns a command within edit distance 2.
@@ -151,7 +185,8 @@ func isUsageErr(err error) bool {
 	return errors.As(err, &u)
 }
 
-// errUsageShown prevents main from printing a flag error twice.
+// errUsageShown tells run that the usage text was already written, so it
+// exits with status 2 without printing the error a second time.
 var errUsageShown = errors.New("usage already shown")
 
 // parseFlags writes help to stdout and parse errors to stderr.
@@ -176,6 +211,15 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 // isTTY recognizes native and Cygwin/MSYS terminals.
 func isTTY(f *os.File) bool {
 	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
+}
+
+// signalContext returns a context that is canceled by SIGINT or SIGTERM. Long
+// running commands use it so that Ctrl-C in a terminal and a service manager
+// or MCP client stopping the process both unwind through the same path and
+// close the archive cleanly. Callers must defer the returned stop function
+// to release signal registrations when the command returns.
+func signalContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
 // describe adds a summary and examples to a command's flag help.

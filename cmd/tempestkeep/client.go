@@ -12,9 +12,5 @@ func newAPIClient(token string) (*api.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	options := []api.Option{api.WithCacheTTL(settings.CacheTTL)}
-	if settings.BaseURL != "" {
-		options = append(options, api.WithBaseURL(settings.BaseURL))
-	}
-	return api.New(token, options...)
+	return api.New(token, settings.ClientOptions()...)
 }

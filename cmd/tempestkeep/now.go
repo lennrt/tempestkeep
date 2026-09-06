@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"strings"
 	"sync"
 	"time"
@@ -70,8 +69,10 @@ func (l *nowLiveSource) stationName() string {
 }
 
 // load fetches one frame of data. Live is preferred; if the live fetch fails and
-// an archive is present, it falls back so the dashboard still shows something.
+// an archive is present, it falls back so the dashboard still shows something,
+// and says so in the note so an outage is never mistaken for fresh data.
 func (c nowConfig) load(ctx context.Context) (dashboard, error) {
+	var liveErr error
 	if c.live != nil {
 		station, err := c.live.resolve(ctx)
 		if err == nil {
@@ -112,7 +113,7 @@ func (c nowConfig) load(ctx context.Context) (dashboard, error) {
 		if c.store == nil {
 			return dashboard{}, err
 		}
-		// fall through to the archive
+		liveErr = err // fall through to the archive
 	}
 	if c.store != nil {
 		o, err := c.store.Latest(ctx)
@@ -129,6 +130,9 @@ func (c nowConfig) load(ctx context.Context) (dashboard, error) {
 		d := buildArchiveDashboard(stationName, o)
 		if err := fillArchiveRainToday(ctx, c.store, &d, time.Now()); err != nil {
 			return dashboard{}, err
+		}
+		if liveErr != nil {
+			d.note = "live data unavailable; showing the latest archived observation; " + d.note
 		}
 		return d, nil
 	}
@@ -338,7 +342,7 @@ func errorCard(err error) string {
 // cmdNow implements `tempestkeep now`: a live, auto-refreshing dashboard, or a single
 // rendered frame with --once (pipe-friendly, like wttr.in).
 func cmdNow(args []string) (err error) {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 	fs := flag.NewFlagSet("now", flag.ContinueOnError)
 	describe(fs, "tempestkeep now: current conditions as a live terminal dashboard. Use --once\nfor a single frame, or --format json for scriptable output.",

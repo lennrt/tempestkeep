@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -108,48 +109,50 @@ func TestE2ECommandMCPStdio(t *testing.T) {
 		assertMCPDiagnostics(t, stderr.String(), dbPath)
 	})
 
-	t.Run("interrupt cancellation", func(t *testing.T) {
-		if runtime.GOOS == "windows" {
-			t.Skip("os.Interrupt is not implemented on Windows")
-		}
+	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGTERM} {
+		t.Run(sig.String()+" cancellation", func(t *testing.T) {
+			if runtime.GOOS == "windows" {
+				t.Skip("os.Interrupt is not implemented on Windows")
+			}
 
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-		defer cancel()
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
 
-		cmd, stderr, dbPath := newMCPSubprocess(t, ctx)
-		client := mcp.NewClient(&mcp.Implementation{Name: "command-e2e", Version: "test"}, nil)
-		session, err := client.Connect(ctx, &mcp.CommandTransport{
-			Command:           cmd,
-			TerminateDuration: 2 * time.Second,
-		}, nil)
-		if err != nil {
-			t.Fatalf("connect to tempestkeep mcp: %v\nstderr:\n%s", err, stderr)
-		}
+			cmd, stderr, dbPath := newMCPSubprocess(t, ctx)
+			client := mcp.NewClient(&mcp.Implementation{Name: "command-e2e", Version: "test"}, nil)
+			session, err := client.Connect(ctx, &mcp.CommandTransport{
+				Command:           cmd,
+				TerminateDuration: 2 * time.Second,
+			}, nil)
+			if err != nil {
+				t.Fatalf("connect to tempestkeep mcp: %v\nstderr:\n%s", err, stderr)
+			}
 
-		wait := make(chan error, 1)
-		go func() { wait <- session.Wait() }()
-		if err := cmd.Process.Signal(os.Interrupt); err != nil {
-			t.Fatalf("interrupt MCP subprocess: %v", err)
-		}
-		select {
-		case <-wait:
-		case <-ctx.Done():
-			t.Fatalf("MCP subprocess did not stop after interrupt: %v", ctx.Err())
-		}
+			wait := make(chan error, 1)
+			go func() { wait <- session.Wait() }()
+			if err := cmd.Process.Signal(sig); err != nil {
+				t.Fatalf("interrupt MCP subprocess: %v", err)
+			}
+			select {
+			case <-wait:
+			case <-ctx.Done():
+				t.Fatalf("MCP subprocess did not stop after interrupt: %v", ctx.Err())
+			}
 
-		// The real command reports cancellation as a non-zero interrupted run.
-		// Close reaps the child; its error is the expected exit status.
-		_ = session.Close()
-		if cmd.ProcessState == nil {
-			t.Fatal("MCP subprocess was not reaped after interrupt")
-		}
-		if got := stderr.String(); !strings.Contains(got, "tempestkeep: context canceled") {
-			t.Fatalf("cancellation diagnostic is missing\nstderr:\n%s", got)
-		}
-		if strings.Contains(stderr.String(), dbPath) {
-			t.Fatalf("cancellation diagnostic exposed the archive path\nstderr:\n%s", stderr)
-		}
-	})
+			// The real command reports cancellation as a non-zero interrupted run.
+			// Close reaps the child; its error is the expected exit status.
+			_ = session.Close()
+			if cmd.ProcessState == nil {
+				t.Fatal("MCP subprocess was not reaped after interrupt")
+			}
+			if got := stderr.String(); !strings.Contains(got, "tempestkeep: context canceled") {
+				t.Fatalf("cancellation diagnostic is missing\nstderr:\n%s", got)
+			}
+			if strings.Contains(stderr.String(), dbPath) {
+				t.Fatalf("cancellation diagnostic exposed the archive path\nstderr:\n%s", stderr)
+			}
+		})
+	}
 }
 
 // TestMCPSubprocessHelper turns this test binary into the real tempestkeep

@@ -201,6 +201,7 @@ const (
 	// MaxDotenvBytes bounds configuration file reads and direct parsing.
 	MaxDotenvBytes = 1 << 20
 )
+const DefaultCacheTTL = 5 * time.Minute
 VARIABLES
 var ErrConfigIO = errors.New("configuration I/O failure")
 var ErrInvalidConfig = errors.New("invalid configuration")
@@ -208,6 +209,7 @@ FUNCTIONS
 func FirstNonEmpty(values ...string) string
 func FormatDotenvValue(value string) (string, error)
 func LoadDotenv(ctx context.Context, path string) (err error)
+func ParseBool(value string) (bool, error)
 func ParseDotenv(data []byte) (map[string]string, error)
 func ResolveDB(ctx context.Context, explicit string) (string, error)
 TYPES
@@ -216,6 +218,7 @@ type APISettings struct {
 	CacheTTL time.Duration
 }
 func APISettingsFromEnv() (APISettings, error)
+func (s APISettings) ClientOptions() []api.Option
 
 ## pkg/tempest/model
 

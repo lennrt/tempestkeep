@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -29,9 +28,10 @@ const (
 	maxBackupEntries = 10_000
 )
 
-// cmdCollect updates or creates the local archive.
+// cmdCollect updates or creates the local archive. SIGINT and SIGTERM cancel
+// the walk; committed chunks and the resume cursor survive either.
 func cmdCollect(args []string) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 
 	fs := flag.NewFlagSet("collect", flag.ContinueOnError)

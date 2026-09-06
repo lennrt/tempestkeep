@@ -4,6 +4,15 @@
 
 ### Added
 
+- Signal-aware shutdown: `mcp`, `collect`, `now`, and `explore` stop cleanly
+  on SIGTERM as well as SIGINT, so MCP clients, cron, and service managers
+  that terminate the process no longer leave the archive without a clean
+  close. `collect` still saves its resume cursor on either signal.
+- `config.ParseBool`, `config.DefaultCacheTTL`, and
+  `config.APISettings.ClientOptions` so every command builds its API client
+  the same way. `config.FirstNonEmpty` is now a thin wrapper over `cmp.Or`.
+- `mcpapp.Options.Client` and `mcpapp.Options.Transport` so the MCP server
+  can be driven in-process over `mcp.NewInMemoryTransports` in tests.
 - OpenSSF Best Practices badge and criterion evidence for project 14460.
 - Documented contribution, security triage, and release-note requirements.
 - Vertical scrolling in `now` and `explore`: Up/Down or k/j for a row, and
@@ -12,6 +21,18 @@
 - README badges for development version, CI, license, Go version, Go Reference,
   and stars, plus a compact terminal-controls guide.
 - An embedded development version, shared with Makefile fallback builds.
+
+### Changed
+
+- Retries use jittered exponential backoff (bounded by `RetryPolicy` and
+  respecting `Retry-After` up to the configured maximum) and also retry HTTP 408.
+- Sanitized transport errors keep their timeout classification: they still
+  match `api.ErrTransport`, and a deadline additionally matches
+  `context.DeadlineExceeded` and reports `Timeout() == true`.
+- The `tempestkeep` entry point is a testable `run` function with named exit
+  statuses; helpers no longer call `os.Exit`.
+- `tempestkeep now` marks a frame that fell back to the archive because live
+  data was unavailable, instead of presenting the fallback silently.
 
 ### Fixed
 

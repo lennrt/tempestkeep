@@ -56,7 +56,8 @@ bin/tempestkeep mcp --db ./tempest.sqlite
 
 The process waits for MCP JSON-RPC on stdin. Stdout carries JSON-RPC only.
 Diagnostics use stderr. Stop it by canceling the MCP session or sending an
-interrupt.
+interrupt (SIGINT) or termination signal (SIGTERM). Either signal cancels
+active work and closes the archive before the process exits.
 
 If no token and no readable archive exist, startup fails. A live API outage does
 not block startup. The first live call resolves the station and retries resolution

@@ -19,9 +19,24 @@ import (
 
 // Options contains resolved MCP inputs. Run borrows these values for the call.
 type Options struct {
-	Token    string
+	// Client serves live requests and takes precedence over Token. Run borrows
+	// it without reading API settings from the environment. When Client is nil
+	// and Token is set, Run constructs one using ambient TEMPEST_API_* settings
+	// for compatibility with existing callers.
+	Client *api.Client
+
+	// Token is a WeatherFlow personal access token.
+	// Prefer Client to supply resolved configuration.
+	Token string
+
 	DBPath   string
 	ReadOnly bool
+
+	// Transport carries the JSON-RPC session. A nil Transport means stdio,
+	// which is what the tempestkeep command uses. Tests supply an in-memory
+	// transport from mcp.NewInMemoryTransports so the whole server, including
+	// tool registration, runs in-process without spawning a binary.
+	Transport mcp.Transport
 }
 
 // Run serves MCP until the context is canceled or the transport fails.
@@ -37,16 +52,18 @@ func Run(ctx context.Context, opts Options) (err error) {
 	)
 
 	// Resolve the station on first use. An unavailable API must not delay startup.
-	if opts.Token != "" {
-		client, err := newAPIClient(opts.Token)
-		if err != nil {
+	client := opts.Client
+	if client == nil && opts.Token != "" {
+		if client, err = newAPIClient(opts.Token); err != nil {
 			return err
 		}
+	}
+	if client != nil {
 		live = &liveSource{client: client}
 	}
 
 	// Open the writer first. It creates the schema before the read handle opens.
-	if opts.Token != "" && opts.DBPath != "" && !opts.ReadOnly {
+	if live != nil && opts.DBPath != "" && !opts.ReadOnly {
 		writer, err = store.OpenWriter(ctx, opts.DBPath)
 		if err != nil {
 			return fmt.Errorf("open configured archive for writes: %w", err)
@@ -77,10 +94,15 @@ func Run(ctx context.Context, opts Options) (err error) {
 	}
 
 	log.Printf("tempestkeep mcp %s ready (live=%v, archive=%v, writable=%v)", version.String(), live != nil, st != nil, writer != nil)
-	if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil {
+	transport := opts.Transport
+	if transport == nil {
+		transport = &mcp.StdioTransport{}
+	}
+	if err := srv.Run(ctx, transport); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		// Malformed input and custom transports can embed sensitive details.
 		return errors.New("MCP server stopped with an error")
 	}
 	return nil

@@ -3,6 +3,7 @@
 package config
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/lennrt/tempestkeep/pkg/tempest/api"
 )
 
 const (
@@ -25,17 +28,35 @@ const (
 	maxEnvKeyBytes     = 256
 )
 
+// ErrInvalidConfig reports a malformed or out-of-range setting. The returned
+// error names the setting but never echoes its value.
 var ErrInvalidConfig = errors.New("invalid configuration")
 
 // ErrConfigIO reports a configuration file or environment I/O failure. The
 // returned error does not contain a path, key, or value.
 var ErrConfigIO = errors.New("configuration I/O failure")
 
+// DefaultCacheTTL is the API response cache lifetime used when
+// TEMPEST_CACHE_TTL is unset.
+const DefaultCacheTTL = 5 * time.Minute
+
 // APISettings holds validated ambient settings for the API client. An empty
 // BaseURL means the client's default endpoint. CacheTTL is always set.
 type APISettings struct {
 	BaseURL  string
 	CacheTTL time.Duration
+}
+
+// ClientOptions converts settings into api.New options without performing I/O.
+// It copies the values; api.New validates them. An empty BaseURL keeps the
+// default endpoint. A zero CacheTTL disables caching; use APISettingsFromEnv
+// to obtain the environment defaults.
+func (s APISettings) ClientOptions() []api.Option {
+	options := []api.Option{api.WithCacheTTL(s.CacheTTL)}
+	if s.BaseURL != "" {
+		options = append(options, api.WithBaseURL(s.BaseURL))
+	}
+	return options
 }
 
 // LoadDotenv loads a regular KEY=VALUE file without replacing variables that
@@ -205,14 +226,25 @@ func FormatDotenvValue(value string) (string, error) {
 	return value, nil
 }
 
-// FirstNonEmpty returns the first non-empty string.
-func FirstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
+// ParseBool parses a boolean setting. It accepts 1/0, true/false, yes/no, and
+// on/off in any case, and treats an empty value as false. Any other value
+// returns ErrInvalidConfig so a misspelling can never silently select the
+// permissive side of a safety switch such as TEMPEST_READ_ONLY.
+func ParseBool(value string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "", "0", "false", "no", "off":
+		return false, nil
 	}
-	return ""
+	return false, fmt.Errorf("%w: boolean settings accept 1/0, true/false, yes/no, or on/off", ErrInvalidConfig)
+}
+
+// FirstNonEmpty returns the first non-empty string. It is equivalent to
+// [cmp.Or] and is retained so existing callers keep compiling; new code
+// should call cmp.Or directly.
+func FirstNonEmpty(values ...string) string {
+	return cmp.Or(values...)
 }
 
 // ResolveDB returns the explicit path, TEMPEST_DB, or DefaultDB when that file
@@ -221,7 +253,7 @@ func ResolveDB(ctx context.Context, explicit string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if path := FirstNonEmpty(explicit, os.Getenv("TEMPEST_DB")); path != "" {
+	if path := cmp.Or(explicit, os.Getenv("TEMPEST_DB")); path != "" {
 		return path, nil
 	}
 	_, err := os.Stat(DefaultDB)
@@ -245,7 +277,7 @@ func configIO(action string, err error) error {
 // APISettingsFromEnv parses TEMPEST_API_BASE and TEMPEST_CACHE_TTL. Cache TTL
 // is seconds in the inclusive range 0..86400. Invalid values fail closed.
 func APISettingsFromEnv() (APISettings, error) {
-	settings := APISettings{BaseURL: os.Getenv("TEMPEST_API_BASE"), CacheTTL: 5 * time.Minute}
+	settings := APISettings{BaseURL: os.Getenv("TEMPEST_API_BASE"), CacheTTL: DefaultCacheTTL}
 	if raw := os.Getenv("TEMPEST_CACHE_TTL"); raw != "" {
 		seconds, err := strconv.Atoi(raw)
 		if err != nil || seconds < 0 || seconds > 24*60*60 {

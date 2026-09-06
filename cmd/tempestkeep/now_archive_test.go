@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lennrt/tempestkeep/pkg/tempest/api"
 	"github.com/lennrt/tempestkeep/pkg/tempest/model"
 	"github.com/lennrt/tempestkeep/pkg/tempest/store"
 )
@@ -153,5 +156,87 @@ func TestNowLoadCancelsForecastAfterObservationFailure(t *testing.T) {
 	case <-forecastCanceled:
 	case <-ctx.Done():
 		t.Fatal("forecast request was not canceled")
+	}
+}
+
+func TestNowLoadAnnouncesArchiveFallback(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	path := filepath.Join(t.TempDir(), "fallback.sqlite")
+	writer, err := store.OpenWriter(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeOnCleanup(t, writer)
+	if _, err := writer.InsertObs(ctx, 456, []model.DeviceObs{{Epoch: 1700000000, AirTempC: new(20.0)}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeOnCleanup(t, st)
+
+	for _, tc := range []struct {
+		name                 string
+		live, resolveStation bool
+	}{
+		{"archive only", false, false},
+		{"station lookup fails", true, false},
+		{"observation fails", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := nowConfig{store: st}
+			if tc.live {
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/stations" && tc.resolveStation {
+						w.Header().Set("Content-Type", "application/json")
+						_, _ = w.Write([]byte(nowStationsJSON))
+						return
+					}
+					http.Error(w, "synthetic-sensitive-body", http.StatusBadRequest)
+				}))
+				t.Cleanup(srv.Close)
+				client, err := api.New("synthetic-test-token", api.WithBaseURL(srv.URL))
+				if err != nil {
+					t.Fatal(err)
+				}
+				cfg.live = &nowLiveSource{client: client}
+			}
+			d, err := cfg.load(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.source != "archive" || d.tempF == nil || *d.tempF != 68 {
+				t.Fatalf("missing archived reading: %+v", d)
+			}
+			if strings.Contains(d.note, "live data unavailable") != tc.live {
+				t.Fatalf("incorrect fallback note: %q", d.note)
+			}
+			if !strings.Contains(d.note, "pressure is station, not sea-level") {
+				t.Fatalf("lost archive limitation: %q", d.note)
+			}
+			var output bytes.Buffer
+			if err := writeNowJSON(&output, d); err != nil {
+				t.Fatal(err)
+			}
+			var decoded nowJSON
+			if err := json.Unmarshal(output.Bytes(), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if decoded.Note != d.note {
+				t.Fatalf("JSON note = %q, want %q", decoded.Note, d.note)
+			}
+			if tc.live && !strings.Contains(renderDashboard(d, time.Now(), ""), "live data unavailable") {
+				t.Fatal("dashboard hides fallback warning")
+			}
+			if strings.Contains(output.String(), "synthetic-sensitive-body") {
+				t.Fatal("JSON leaked upstream error body")
+			}
+		})
 	}
 }

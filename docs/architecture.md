@@ -29,8 +29,11 @@ flowchart LR
 
 The API client accepts a token and typed options. Construction performs no I/O.
 Each blocking method takes a context. Requests have a per-attempt timeout, a
-bounded retry policy, an 8 MiB body limit, and semantic entry limits. Errors omit
-the request URL, token, response body, and station or device identifier.
+bounded retry policy, an 8 MiB body limit, and semantic entry limits. Retryable
+responses include HTTP 408, 429, and 5xx. Delays use jitter, with Retry-After
+honored up to the configured maximum wait. Errors omit the request URL, token,
+response body, and station or device identifier. Sanitized transport timeouts
+still match context.DeadlineExceeded and api.ErrTransport.
 
 Historical responses contain `obs_st` arrays. The model validates the array
 width, epoch, numeric fields, and physical bounds. It copies retained pointer

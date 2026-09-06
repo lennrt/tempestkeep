@@ -60,6 +60,10 @@ Each request covers at most five days. Each successful chunk commits before the
 next request. Replayed observations do not create duplicates. An interrupted
 open-ended collection stores its cursor and resumes on the next run.
 
+`collect`, `mcp`, `now`, and `explore` handle SIGINT and SIGTERM through their
+cancellation and archive cleanup paths. An interrupted run reports failure;
+collection preserves committed rows and its resume cursor.
+
 Progress uses stderr. `--quiet` disables progress. Errors still use stderr.
 
 After a successful collection, the command checkpoints the WAL and creates a

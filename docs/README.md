@@ -21,6 +21,8 @@ building, setup, collection, MCP operation, privacy, and verification.
   API, compatibility, CI, and release decisions.
 - [Single-command and Homebrew tap ADR](adr/0002-single-command-and-homebrew-tap.md):
   executable naming, MCP dispatch, and distribution decisions.
+- [Retry and command lifecycle ADR](adr/0004-retry-and-command-lifecycle.md):
+  retry classification, configuration, shutdown, and MCP input decisions.
 - [OpenSSF baseline ADR](adr/0003-openssf-security-baseline.md): transport
   defaults, CI repairs, and evidence requirements.
 

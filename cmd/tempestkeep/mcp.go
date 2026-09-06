@@ -1,20 +1,19 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"os"
-	"os/signal"
-	"strings"
 
 	"github.com/lennrt/tempestkeep/internal/mcpapp"
 	"github.com/lennrt/tempestkeep/internal/version"
+	"github.com/lennrt/tempestkeep/pkg/tempest/api"
 	"github.com/lennrt/tempestkeep/pkg/tempest/config"
 )
 
-// cmdMCP resolves command configuration, then gives the blocking MCP server an
-// interrupt-aware context. MCP stdout is reserved for JSON-RPC after startup.
+// cmdMCP resolves command configuration, builds the API client at the command
+// boundary, then gives the blocking MCP server a signal-aware context. MCP
+// stdout is reserved for JSON-RPC after startup.
 func cmdMCP(args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	describe(fs, "tempestkeep mcp: serve live and archived weather data over MCP stdio.",
@@ -35,7 +34,7 @@ func cmdMCP(args []string) error {
 		return nil
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 	if err := config.LoadDotenv(ctx, ".env"); err != nil {
 		return err
@@ -48,21 +47,26 @@ func cmdMCP(args []string) error {
 	if err != nil {
 		return err
 	}
+	var client *api.Client
+	if token := os.Getenv("TEMPEST_TOKEN"); token != "" {
+		if client, err = newAPIClient(token); err != nil {
+			return err
+		}
+	}
 	return mcpapp.Run(ctx, mcpapp.Options{
-		Token:    os.Getenv("TEMPEST_TOKEN"),
+		Client:   client,
 		DBPath:   dbPath,
 		ReadOnly: *readOnlyFlag || envReadOnly,
 	})
 }
 
-// readOnlyEnv rejects unknown values so a misspelling cannot enable writes.
+// readOnlyEnv parses TEMPEST_READ_ONLY. Unknown values are an error so a
+// misspelling cannot enable writes.
 func readOnlyEnv() (bool, error) {
 	const key = "TEMPEST_READ_ONLY"
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
-	case "1", "true", "yes", "on":
-		return true, nil
-	case "", "0", "false", "no", "off":
-		return false, nil
+	value, err := config.ParseBool(os.Getenv(key))
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", key, err)
 	}
-	return false, fmt.Errorf("%s must be a boolean (1/0, true/false, yes/no, on/off)", key)
+	return value, nil
 }

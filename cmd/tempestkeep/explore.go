@@ -12,7 +12,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/signal"
 	"strings"
 	"time"
 
@@ -477,7 +476,7 @@ func divider2() string { return faint().Render(dividerLine(exploreWidth)) }
 // cmdExplore implements `tempestkeep explore`: an interactive, scrubbable history
 // browser over the local archive. Archive-only by design, so no token is needed.
 func cmdExplore(args []string) (err error) {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 	fs := flag.NewFlagSet("explore", flag.ContinueOnError)
 	describe(fs, "tempestkeep explore: browse the archive interactively: day, week, month, year,\nand all-time-records views; scrub back through history with ←/→.",

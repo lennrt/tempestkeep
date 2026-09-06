@@ -152,6 +152,9 @@ Use `--read-only` or `TEMPEST_READ_ONLY=true` to remove archive write tools.
 MCP stdout carries JSON-RPC only. Diagnostics use stderr and omit credentials,
 archive paths, raw identifiers, and response payloads.
 
+The server stops cleanly on SIGINT or SIGTERM, so an MCP client or service
+manager that terminates the process leaves the archive cleanly closed.
+
 The optional package under `plugin/` connects `tempestkeep mcp` to Claude Code.
 Review its metadata and installation flow before distribution.
 
