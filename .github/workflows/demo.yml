@@ -26,6 +26,9 @@ jobs:
       - name: Build demo binaries
         run: make tempestkeep demoapi agentdemo
 
+      - name: Exercise the MCP demo
+        run: make demo-smoke
+
       - name: Install recording dependencies
         run: |
           sudo apt-get update -qq
@@ -45,4 +48,5 @@ jobs:
             docs/demo.gif
             docs/setup.gif
             docs/agent.gif
+            docs/agent.mp4
             docs/explore.gif

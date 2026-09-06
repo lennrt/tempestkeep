@@ -54,6 +54,7 @@ building, setup, collection, MCP operation, privacy, and verification.
 The four `.tape` files use the local mock API. They do not need a station or
 token.
 
+- [MCP recording guide](demo.md): replay, smoke check, and record the lead demo.
 - [CLI and MCP demo](demo.tape)
 - [Setup demo](setup.tape)
 - [MCP agent demo](agent.tape)

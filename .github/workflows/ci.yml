@@ -36,6 +36,9 @@ jobs:
       - name: Vet and test
         run: make vet test
 
+      - name: Exercise the README MCP demo
+        run: make demo-smoke
+
       - name: Run race tests
         run: make race
 

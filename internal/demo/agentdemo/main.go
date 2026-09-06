@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -28,7 +29,9 @@ var (
 
 	// pace is the pause between printed lines, so the recording reads like a
 	// session rather than a dump. Overridable for fast local runs.
-	pace = flag.Duration("pace", 450*time.Millisecond, "pause between lines")
+	pace   = flag.Duration("pace", 450*time.Millisecond, "pause between lines")
+	hold   = flag.Duration("hold", 3*time.Second, "pause after each scene")
+	scenes = flag.Bool("scenes", false, "clear the screen between recording scenes")
 )
 
 const maxPace = 5 * time.Second
@@ -39,8 +42,8 @@ func main() {
 	}
 	server := flag.String("server", "tempestkeep", "path to the tempestkeep binary")
 	flag.Parse()
-	if *pace < 0 || *pace > maxPace {
-		log.Fatalf("pace must be between 0 and %s", maxPace)
+	if *pace < 0 || *pace > maxPace || *hold < 0 || *hold > 10*time.Second {
+		log.Fatal("pace must be 0..5s and hold must be 0..10s")
 	}
 	if *server == "" || len(*server) > 4096 || strings.IndexByte(*server, 0) >= 0 {
 		log.Fatal("server path must contain 1..4096 bytes and no NUL")
@@ -55,33 +58,116 @@ func run(server string) (err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "agentdemo", Version: "0"}, nil)
-	cs, err := client.Connect(ctx, &mcp.CommandTransport{Command: exec.CommandContext(ctx, server, "mcp")}, nil)
+	scene("01 / DISCOVER", "One MCP connection. Tools, resources, and prompts.")
+	cs, err := connect(ctx, server, false)
 	if err != nil {
-		return errors.New("connect to MCP server failed")
+		return err
 	}
-	defer func() { err = errors.Join(err, cs.Close()) }()
-
-	say(styleDim.Render("· scripted conversation; every tool call below runs for real,"))
-	say(styleDim.Render("  over MCP stdio, against the server your agent would use ·"))
+	defer func() {
+		if cs != nil {
+			err = errors.Join(err, cs.Close())
+		}
+	}()
+	init := cs.InitializeResult()
+	if init.ServerInfo == nil {
+		return errors.New("server returned no identity")
+	}
+	say(styleTool.Render("  initialize") + "  " + init.ServerInfo.Name + " " + init.ServerInfo.Version)
+	say(styleDim.Render("  Go MCP SDK  ->  stdio / JSON-RPC  ->  tempestkeep mcp"))
+	tools, err := cs.ListTools(ctx, nil)
+	if err != nil {
+		return err
+	}
+	resources, err := cs.ListResources(ctx, nil)
+	if err != nil {
+		return err
+	}
+	prompts, err := cs.ListPrompts(ctx, nil)
+	if err != nil {
+		return err
+	}
+	result(fmt.Sprintf("%d tools / %d resources / %d prompts discovered", len(tools.Tools), len(resources.Resources), len(prompts.Prompts)))
 	say("")
+	say("  Live weather      current_conditions / forecast")
+	say("  Local history     daily_summary / wind_rose / query_sql")
+	say("  Archive writes    backfill_archive / sync_archive")
+	time.Sleep(*hold)
 
+	scene("02 / BUILD", "The client builds a resumable local archive.")
 	if err := actBuildArchive(ctx, cs); err != nil {
 		return err
 	}
+	time.Sleep(*hold)
+	scene("03 / ASK", "Chain tool results into the next question.")
 	if err := actWindiestDay(ctx, cs); err != nil {
 		return err
 	}
-	if err := actWindRose(ctx, cs); err != nil {
+	time.Sleep(*hold)
+
+	if err := cs.Close(); err != nil {
 		return err
 	}
+	cs = nil
+	scene("04 / REUSE", "Restart with no API token. Keep asking the archive.")
+	offline, err := connect(ctx, server, true)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, offline.Close()) }()
+	tools, err = offline.ListTools(ctx, nil)
+	if err != nil {
+		return err
+	}
+	for _, tool := range tools.Tools {
+		if tool.Name == "backfill_archive" || tool.Name == "sync_archive" || tool.Name == "forecast" {
+			return errors.New("archive-only session exposed a live or write tool")
+		}
+	}
+	say(styleDim.Render("  No API token / --read-only / same SQLite archive"))
+	result(fmt.Sprintf("%d tools discovered; live and write tools absent", len(tools.Tools)))
+	if err := actWindRose(ctx, offline); err != nil {
+		return err
+	}
+	say("")
+	say(styleTool.Render("  MCP demo complete") + styleDim.Render("  /  your agent, your station, your archive"))
+	time.Sleep(*hold)
 	return nil
+}
+
+func connect(ctx context.Context, server string, readOnly bool) (*mcp.ClientSession, error) {
+	args := []string{"mcp"}
+	if readOnly {
+		args = append(args, "--read-only")
+	}
+	cmd := exec.CommandContext(ctx, server, args...)
+	cmd.Stderr = io.Discard
+	if readOnly {
+		for _, entry := range os.Environ() {
+			if !strings.HasPrefix(entry, "TEMPEST_TOKEN=") {
+				cmd.Env = append(cmd.Env, entry)
+			}
+		}
+		cmd.Env = append(cmd.Env, "TEMPEST_TOKEN=")
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "agentdemo", Version: "0"}, nil)
+	return client.Connect(ctx, &mcp.CommandTransport{Command: cmd, TerminateDuration: 2 * time.Second}, nil)
+}
+
+func scene(number, description string) {
+	if *scenes {
+		fmt.Print("\x1b[2J\x1b[H")
+	}
+	say(styleTool.Bold(true).Render("  TEMPESTKEEP") + styleDim.Render("  /  WEATHER CONTEXT FOR AGENTS"))
+	say(styleDim.Render("  Scripted client / synthetic weather / real MCP calls"))
+	say("")
+	say(styleAgent.Render("  "+number) + "  " + description)
+	say(styleDim.Render("  " + strings.Repeat("─", 76)))
 }
 
 // ---- act 1: the agent builds its own archive ----------------------------------
 
 func actBuildArchive(ctx context.Context, cs *mcp.ClientSession) error {
-	you("Build a local archive of my station's history, then tell me something surprising.")
+	you("Build my station's local archive. Resume until all history is stored.")
 
 	var status struct {
 		Observations int64  `json:"observations"`
@@ -117,35 +203,17 @@ func actBuildArchive(ctx context.Context, cs *mcp.ClientSession) error {
 		}
 	}
 
-	var rec struct {
-		HottestF     *float64 `json:"hottest_f"`
-		HottestTime  string   `json:"hottest_time"`
-		PeakGustMph  *float64 `json:"peak_gust_mph"`
-		PeakGustTime string   `json:"peak_gust_time"`
-		WettestDay   string   `json:"wettest_day"`
-		WettestDayIn *float64 `json:"wettest_day_in"`
-		TotalStrikes *float64 `json:"total_lightning_strikes"`
+	if total == 0 {
+		return errors.New("demo backfill returned no observations")
 	}
-	if err := call(ctx, cs, "records", nil, &rec); err != nil {
-		return err
-	}
-	result("all-time records computed from the local copy")
-
-	answer := fmt.Sprintf("Your archive now holds %s one-minute observations; history is answered locally from here on.", comma(total))
-	if rec.PeakGustMph != nil && rec.WettestDay != "" && rec.TotalStrikes != nil && *rec.TotalStrikes > 0 {
-		answer += fmt.Sprintf(" The surprise: your wettest day (%s, %.2f in) also brought %.0f lightning strikes and your peak gust of %.0f mph. One evening thundershower owns most of your extremes.",
-			shortDate(rec.WettestDay), *rec.WettestDayIn, *rec.TotalStrikes, *rec.PeakGustMph)
-	} else if rec.HottestF != nil {
-		answer += fmt.Sprintf(" All-time high so far: %.1f°F (%s).", *rec.HottestF, rec.HottestTime)
-	}
-	agent(answer)
+	agent(fmt.Sprintf("%s one-minute observations stored in SQLite. Historical questions can now be answered from the local archive.", comma(total)))
 	return nil
 }
 
 // ---- act 2: windiest day, gusts or sustained? ---------------------------------
 
 func actWindiestDay(ctx context.Context, cs *mcp.ClientSession) error {
-	you("What was the windiest day this month: gusts, or sustained wind?")
+	you("Which day had the strongest gust in the last 30 days? Compare its hourly wind.")
 
 	var daily struct {
 		Days []struct {
@@ -185,9 +253,9 @@ func actWindiestDay(ctx context.Context, cs *mcp.ClientSession) error {
 			sustained = *p.WindMph
 		}
 	}
-	result(fmt.Sprintf("hourly sustained wind topped out at %.0f mph", sustained))
+	result(fmt.Sprintf("highest hourly mean: %.0f mph", sustained))
 
-	agent(fmt.Sprintf("%s was the windiest: gusts hit %.0f mph while sustained wind never passed %.0f mph, so it was gusty rather than steadily windy.",
+	agent(fmt.Sprintf("%s had the strongest gust: %.0f mph. Its highest hourly mean was %.0f mph. The daily summary picked the day; hourly observations supplied the comparison.",
 		shortDate(bestDay), bestGust, sustained))
 	return nil
 }
@@ -195,7 +263,7 @@ func actWindiestDay(ctx context.Context, cs *mcp.ClientSession) error {
 // ---- act 3: the wind rose -------------------------------------------------------
 
 func actWindRose(ctx context.Context, cs *mcp.ClientSession) error {
-	you("Where does my wind usually come from?")
+	you("Using only the local archive, where does the wind usually come from?")
 
 	var rose struct {
 		Sectors []struct {
@@ -216,7 +284,7 @@ func actWindRose(ctx context.Context, cs *mcp.ClientSession) error {
 	top, second := rose.Sectors[0], rose.Sectors[1]
 	result(fmt.Sprintf("%s %.0f%% · %s %.0f%% · calm %.0f%%", top.Sector, top.Pct, second.Sector, second.Pct, rose.CalmPct))
 
-	answer := fmt.Sprintf("Mostly %s: %.0f%% of observed wind, with %s next at %.0f%%.", top.Sector, top.Pct, second.Sector, second.Pct)
+	answer := fmt.Sprintf("Mostly %s: %.0f%% of non-calm samples, with %s next at %.0f%%.", top.Sector, top.Pct, second.Sector, second.Pct)
 	if top.AvgMph != nil {
 		answer += fmt.Sprintf(" It averages %.0f mph from that direction, and the air is calm %.0f%% of the time.", *top.AvgMph, rose.CalmPct)
 	}
@@ -230,10 +298,10 @@ func actWindRose(ctx context.Context, cs *mcp.ClientSession) error {
 // result into out via JSON round-trip (the server publishes output schemas, so
 // the shape is stable).
 func call(ctx context.Context, cs *mcp.ClientSession, name string, args map[string]any, out any) error {
-	line := "  " + styleDim.Render("⚙ calling ") + styleTool.Render(name)
+	line := "  " + styleDim.Render("tool  ") + styleTool.Render(name)
 	if len(args) > 0 {
 		if j, err := json.Marshal(args); err == nil {
-			line += " " + styleDim.Render(string(j))
+			line += "\n    " + styleDim.Render(string(j))
 		}
 	}
 	say(line)
@@ -273,13 +341,13 @@ func say(s string) {
 
 func you(q string) {
 	say("")
-	say(styleYou.Render("❯ you   ") + wrap(q, 8))
+	say(styleYou.Render("  ask   ") + wrap(q, 8))
 	say("")
 }
 
 func agent(a string) {
 	say("")
-	say(styleAgent.Render("● agent ") + wrap(a, 8))
+	say(styleAgent.Render("  reply ") + wrap(a, 8))
 }
 
 func result(s string) {

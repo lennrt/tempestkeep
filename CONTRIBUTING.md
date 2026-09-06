@@ -39,7 +39,7 @@ make verify
 tidiness, documentation and local links, vet, ordinary tests, race tests,
 focused fuzz tests, lint, generated public API evidence, GitHub Actions syntax,
 vulnerabilities, licenses, SBOM generation, secrets, and pure-Go builds for the
-host and Linux ARM64.
+host and Linux ARM64, and the synthetic MCP demo smoke check.
 
 Run a focused check when the full suite is not needed:
 

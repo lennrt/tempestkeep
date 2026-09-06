@@ -1,5 +1,3 @@
-![TempestKeep: weather data flowing into a protected local archive](docs/tempestkeep-hero.jpg)
-
 # TempestKeep
 
 [![Development version][version-badge]](CHANGELOG.md)
@@ -10,67 +8,148 @@
 [![Go Reference][docs-badge]][go-docs]
 [![GitHub stars][stars-badge]][stars]
 
-TempestKeep reads WeatherFlow Tempest data. The `tempestkeep` command provides
-setup, collection, export, reports, terminal views, and an MCP stdio server. It
-stores one-minute observations in a local SQLite archive.
+**Your weather station, available to your agent.**
 
-The archive stays on the local machine. TempestKeep sends authenticated read
-requests to the WeatherFlow REST API when a live operation or collection needs
-data.
+TempestKeep is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)
+server for WeatherFlow Tempest. Give an agent live conditions, forecasts, and a
+queryable local history. It can build the archive itself, resume interrupted
+collection, and answer historical questions from SQLite.
 
-## Requirements
+One Go binary. MCP over stdio. A local archive you can also inspect with the CLI.
 
-- Go 1.27.0.
-- A WeatherFlow personal access token for live data or collection.
-- A local filesystem for the active SQLite archive.
+[![MCP discovery, archive backfill, chained queries, and offline reuse][mcp-demo]][mcp-video]
 
-The normal build is pure Go and uses `CGO_ENABLED=0`. Race tests need a C
-toolchain.
+[Watch the MP4 clip][mcp-video] · [Run the demo locally](#try-it-without-a-station)
+· [Connect your agent](#connect-your-agent) · [CLI and terminal UI](#cli-and-terminal-ui)
 
-## Quickstart
+The clip uses synthetic weather and a scripted Go client. Discovery, tool calls,
+archive writes, and the final session without an API token all run through the
+real MCP server. No LLM or WeatherFlow account is needed to replay it.
 
-Obtain the source over HTTPS:
+## What your agent can do
+
+With live access and a writable archive, TempestKeep exposes **29 typed tools,
+2 resources, and 3 prompts**. Each tool has an input schema and structured output.
+
+| Ask your agent | MCP workflow |
+|---|---|
+| "Build my station's archive and keep it current." | `archive_status` → resumable `backfill_archive` → `sync_archive` |
+| "Which day had the strongest gust in the last 30 days?" | `daily_summary` → `get_observations` for that day |
+| "Where does the wind usually come from?" | `wind_rose` over the local archive |
+| "Is today's weather unusual for this station?" | `current_conditions` → `this_day_in_history` → `records` |
+| "Explain the archive before writing a query." | Read the schema and data-dictionary resources, then use `query_sql` |
+
+The `weather_report`, `climate_review`, and `build_archive` prompts package
+common workflows. The resources explain the schema, units, and aggregation
+rules so a client can work with the stored data.
+
+Capabilities follow configuration:
+
+| Inputs | Available operations |
+|---|---|
+| token | live conditions, station metadata, and forecast |
+| archive | local observations, summaries, records, and read-only SQL |
+| token and writable archive | bounded archive backfill and sync |
+
+Use `--read-only` or `TEMPEST_READ_ONLY=true` to remove archive write tools.
+SQL reads are bounded and enforced by a read-only database handle. Backfill
+calls have bounded work and persist a resume cursor between calls.
+
+See the [MCP guide](docs/mcp.md) for configuration, capabilities, and limits.
+
+## Connect your agent
+
+### Build
+
+You need **Go 1.27.0**, a local filesystem for SQLite, and a WeatherFlow personal
+access token for live data or collection. An existing archive works without a
+token. The normal build is pure Go; race tests need a C toolchain.
 
 ```sh
 git clone https://github.com/lennrt/tempestkeep.git
 cd tempestkeep
-```
-
-Check the toolchain and build the command:
-
-```sh
-go version
-# The result must start with: go version go1.27.0
-
 go mod download
 make build
-export PATH="$PWD/bin:$PATH"
 ```
 
-Keep the directory that contains `tempestkeep` on `PATH` when the MCP client
-starts. Then run the setup wizard:
+The executable is `bin/tempestkeep`. Use its absolute path in a desktop MCP
+client, or put it on that client's `PATH`.
 
-```sh
-tempestkeep setup
+### Configure the MCP client
+
+For clients that use an `mcpServers` configuration, add the following to the
+client's **private local configuration**. Replace the paths, token placeholder,
+and timezone with your own values:
+
+```json
+{
+  "mcpServers": {
+    "tempestkeep": {
+      "command": "/absolute/path/to/tempestkeep/bin/tempestkeep",
+      "args": ["mcp"],
+      "env": {
+        "TEMPEST_TOKEN": "YOUR_WEATHERFLOW_TOKEN",
+        "TEMPEST_DB": "/absolute/path/to/weather/tempest.sqlite",
+        "TZ": "America/Los_Angeles"
+      }
+    }
+  }
+}
 ```
 
-The wizard validates the token, selects an archive path, and prints MCP setup
-guidance.
+Use your client's secret store if it provides one. Keep credentials out of Git
+and command arguments. Clients with a different configuration format need the
+same command, arguments, and environment values.
 
-For manual setup, copy `.env.example` to `.env`, set `TEMPEST_TOKEN`, and limit
-the file to the current user:
+Restart or reconnect the MCP client, then ask it to **build your station's local
+archive**. With a token and database path, TempestKeep creates the archive and
+exposes the backfill tools. For an existing archive without live access, omit
+`TEMPEST_TOKEN` and add `--read-only` to `args`.
+
+The host launches `tempestkeep mcp` and exchanges JSON-RPC over stdin/stdout.
+Diagnostics go to stderr. SIGINT and SIGTERM cancel work and close the archive.
+The archive remains local; tool results are delivered to the connected MCP
+client and may be sent to the model that client uses.
+
+The optional [Claude Code plugin](plugin/README.md) uses the same server.
+
+## Try it without a station
+
+Run the same MCP session shown above with a local synthetic API and a temporary
+archive. No real token or model provider is used:
 
 ```sh
-cp .env.example .env
-chmod 600 .env
-./bin/tempestkeep list-devices
+make mcp-demo
+```
+
+The demo discovers capabilities, builds 45 days of history, chains a daily
+summary into an hourly query, and reconnects with no token in read-only mode.
+It removes its temporary archive and stops the synthetic API when finished.
+
+To record the GIF and MP4 with [Charm's VHS][vhs], install VHS v0.11.0, `ttyd`,
+and `ffmpeg`, then run:
+
+```sh
+make demo-agent
+```
+
+The recording is defined in [docs/agent.tape](docs/agent.tape), with a
+[reproduction guide](docs/demo.md) covering the transcript and recording checks.
+
+## CLI and terminal UI
+
+The CLI gives you direct access to the same live data and archive. Start with
+the interactive setup wizard, then collect history and open the dashboard:
+
+```sh
+./bin/tempestkeep setup
 ./bin/tempestkeep collect
+./bin/tempestkeep now
+./bin/tempestkeep explore
 ```
 
-Do not put a token on a command line. Command lines can be retained in shell
-history and process diagnostics. Rotate a token after any exposure.
-
-## Main commands
+For manual setup, copy `.env.example` to `.env`, set `TEMPEST_TOKEN`, and restrict
+the file to the current user with `chmod 600 .env`.
 
 ```text
 tempestkeep setup          Configure the token and archive.
@@ -129,35 +208,6 @@ they promise US units. Calendar summaries use the process timezone. Set `TZ` to
 the station's IANA timezone before running calendar reports on a host with a
 different timezone.
 
-## MCP server
-
-Run the server over stdio:
-
-```sh
-./bin/tempestkeep mcp --db ./tempest.sqlite
-```
-
-Pass `TEMPEST_TOKEN` and `TEMPEST_DB` through the MCP client's environment
-configuration. Do not place the token in repository files or command arguments.
-
-Capabilities depend on available inputs:
-
-| Inputs | Available operations |
-|---|---|
-| token | live conditions, station metadata, and forecast |
-| archive | local observations, summaries, records, and read-only SQL |
-| token and writable archive | bounded archive backfill and sync |
-
-Use `--read-only` or `TEMPEST_READ_ONLY=true` to remove archive write tools.
-MCP stdout carries JSON-RPC only. Diagnostics use stderr and omit credentials,
-archive paths, raw identifiers, and response payloads.
-
-The server stops cleanly on SIGINT or SIGTERM, so an MCP client or service
-manager that terminates the process leaves the archive cleanly closed.
-
-The optional package under `plugin/` connects `tempestkeep mcp` to Claude Code.
-Review its metadata and installation flow before distribution.
-
 ## Security and privacy
 
 Treat these files as sensitive:
@@ -182,6 +232,7 @@ make docs-check     # Markdown format and local links
 make tidy-check     # go.mod and go.sum drift
 make vet
 make test           # pure-Go tests
+make demo-smoke     # real MCP demo against synthetic data
 make race
 make fuzz           # bounded fuzz smoke tests
 make lint
@@ -263,3 +314,7 @@ TempestKeep uses the MIT License. See [LICENSE](LICENSE).
 [best-practices-badge]: https://www.bestpractices.dev/projects/14460/badge
 [best-practices]: https://www.bestpractices.dev/en/projects/14460/passing
 [issues]: https://github.com/lennrt/tempestkeep/issues
+
+[mcp-demo]: docs/agent.gif
+[mcp-video]: https://raw.githubusercontent.com/lennrt/tempestkeep/main/docs/agent.mp4
+[vhs]: https://github.com/charmbracelet/vhs

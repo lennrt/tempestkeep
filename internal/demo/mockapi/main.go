@@ -8,11 +8,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"log"
 	"math"
+	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 )
@@ -25,6 +28,7 @@ const (
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8910", "listen address")
+	urlFile := flag.String("url-file", "", "write the listening URL to this private readiness file")
 	flag.Parse()
 
 	mux := http.NewServeMux()
@@ -39,8 +43,22 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       30 * time.Second,
 	}
-	log.Printf("mock WeatherFlow API on http://%s (station %q)", *addr, name)
-	log.Fatal(server.ListenAndServe())
+	listenCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	var listenConfig net.ListenConfig
+	listener, err := listenConfig.Listen(listenCtx, "tcp", *addr)
+	cancel()
+	if err != nil {
+		log.Fatal(err)
+	}
+	url := "http://" + listener.Addr().String()
+	if *urlFile != "" {
+		if err := os.WriteFile(*urlFile, []byte(url+"\n"), 0o600); err != nil {
+			_ = listener.Close()
+			log.Fatal("cannot write demo readiness file")
+		}
+	}
+	log.Printf("mock WeatherFlow API on %s (station %q)", url, name)
+	log.Fatal(server.Serve(listener))
 }
 
 // ---- the weather model -------------------------------------------------------

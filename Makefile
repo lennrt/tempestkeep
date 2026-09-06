@@ -2,6 +2,7 @@
 # Go downloads tool modules through the checksum database.
 
 GO ?= go
+VHS ?= vhs
 BIN_DIR ?= bin
 
 GO_VERSION := 1.27.0
@@ -17,7 +18,7 @@ GORELEASER_VERSION := v2.18.0
 VERSION ?= $(shell git describe --tags --dirty --match 'v[0-9]*' 2>/dev/null || printf 'v%s-dev' "$$(cat internal/version/VERSION)")
 LDFLAGS := -ldflags "-X github.com/lennrt/tempestkeep/internal/version.version=$(VERSION)"
 
-.PHONY: all check-go download tidy tidy-check update-deps build build-pure build-arm64 vet fmt fmtcheck docs-check lint workflows vuln test integration e2e live-smoke race fuzz bench cover api-check api-update generated licenses sbom secrets verify tempestkeep demoapi agentdemo demo demo-setup demo-agent demo-explore vhs release-check hooks clean
+.PHONY: all check-go download tidy tidy-check update-deps build build-pure build-arm64 vet fmt fmtcheck docs-check lint workflows vuln test integration e2e live-smoke race fuzz bench cover api-check api-update generated licenses sbom secrets verify tempestkeep demoapi agentdemo demo demo-setup demo-agent mcp-demo demo-smoke demo-explore vhs release-check hooks clean
 
 all: build
 
@@ -120,7 +121,7 @@ secrets:
 	$(GO) run github.com/zricethezav/gitleaks/v8@$(GITLEAKS_VERSION) git --redact --no-banner --no-color --timeout=300 --log-opts=--all
 	$(GO) run github.com/zricethezav/gitleaks/v8@$(GITLEAKS_VERSION) dir --redact --no-banner --no-color --timeout=300 --max-target-megabytes=20 .
 
-verify: check-go download fmtcheck docs-check tidy-check vet test race fuzz lint workflows generated vuln licenses sbom secrets build-pure build-arm64
+verify: check-go download fmtcheck docs-check tidy-check vet test race fuzz lint workflows generated vuln licenses sbom secrets build-pure build-arm64 demo-smoke
 
 tempestkeep:
 	@mkdir -p $(BIN_DIR)
@@ -140,8 +141,14 @@ demo: tempestkeep demoapi
 demo-setup: tempestkeep demoapi
 	vhs docs/setup.tape
 
+mcp-demo: tempestkeep demoapi agentdemo
+	./scripts/demo-agent.sh
+
+demo-smoke: tempestkeep demoapi agentdemo
+	./scripts/check-mcp-demo.sh
+
 demo-agent: tempestkeep demoapi agentdemo
-	vhs docs/agent.tape
+	$(VHS) docs/agent.tape
 
 demo-explore: tempestkeep demoapi
 	vhs docs/explore.tape
