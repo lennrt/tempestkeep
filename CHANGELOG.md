@@ -20,6 +20,8 @@
   clients remain caller-owned security boundaries.
 - Build CI's pinned linter with Go 1.27, retain Scorecard results, and fail
   formatting checks when the imports tool fails.
+- Update static analyzers for Go 1.27's Linux library and make rain-summary
+  regression fixtures independent of the time of day.
 - Bound every interactive frame to the terminal width and height, including
   loading, errors, and narrow-window notices. Keep fitting cards centered.
 - Prevent long station names, conditions, status messages, and error text from

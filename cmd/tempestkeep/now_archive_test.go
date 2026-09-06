@@ -19,7 +19,8 @@ const nowStationsJSON = `{"stations":[{"station_id":123,"name":"Test Station","l
 const nowObsJSON = `{"obs":[{"timestamp":1700000000,"air_temperature":20.5,"relative_humidity":45,"sea_level_pressure":1013,"wind_avg":2,"wind_gust":4,"wind_direction":180,"uv":5,"solar_radiation":500,"feels_like":21,"dew_point":8,"precip_accum_local_day":1,"lightning_strike_count_last_1hr":2,"lightning_strike_last_distance":10}]}`
 
 func TestFillArchiveRainTodaySumsIntervals(t *testing.T) {
-	now := time.Now().Truncate(time.Second)
+	// Keep both intervals in the requested day, even when CI runs at midnight.
+	now := time.Date(2026, time.September, 5, 12, 0, 0, 0, time.Local)
 	path := filepath.Join(t.TempDir(), "rain.sqlite")
 	w, err := store.OpenWriter(context.Background(), path)
 	if err != nil {
@@ -52,8 +53,10 @@ func TestFillArchiveRainTodaySumsIntervals(t *testing.T) {
 }
 
 func TestFillArchiveRainTodayIgnoresStaleArchive(t *testing.T) {
-	d := dashboard{obsTime: time.Now().AddDate(0, 0, -1)}
-	if err := fillArchiveRainToday(context.Background(), nil, &d, time.Now()); err != nil {
+	// The most recent interval can belong to yesterday just after midnight.
+	now := time.Date(2026, time.September, 5, 0, 0, 30, 0, time.Local)
+	d := dashboard{obsTime: now.Add(-time.Minute)}
+	if err := fillArchiveRainToday(context.Background(), nil, &d, now); err != nil {
 		t.Fatal(err)
 	}
 	if d.rainTodayIn != nil {
