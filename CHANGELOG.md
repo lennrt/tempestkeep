@@ -36,6 +36,11 @@
 
 ### Fixed
 
+- Accept the 22-field `obs_st` rows the REST observations endpoint returns.
+  The four derived rain values after the 18 sensor fields are ignored; rows
+  wider than 22 fields are still rejected. Previously collection failed on the
+  first chunk with `obs_st row must contain 1..18 fields`, so affected
+  stations could not be archived.
 - Require modern TLS and certificate key sizes with the default API client;
   return an HTTP error for redirects instead of following them. Custom HTTP
   clients remain caller-owned security boundaries.

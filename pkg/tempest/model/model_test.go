@@ -28,7 +28,7 @@ func TestDeviceObsFromRowCopiesAndValidates(t *testing.T) {
 		t.Fatalf("observation changed with caller-owned row: %+v", observation)
 	}
 
-	tooWide := slices.Concat(row, []*float64{new(float64)})
+	tooWide := slices.Concat(row, make([]*float64, restObsFields-DeviceObsFields+1))
 	if _, err := DeviceObsFromRow(tooWide); !errors.Is(err, ErrInvalidObservation) {
 		t.Fatalf("wide row error = %v, want ErrInvalidObservation", err)
 	}
@@ -38,8 +38,30 @@ func TestDeviceObsFromRowCopiesAndValidates(t *testing.T) {
 	}
 }
 
+// The REST observations endpoint returns 22-field obs_st rows. The four
+// derived rain values after the sensor fields must not reject the row or
+// shift any sensor value.
+func TestDeviceObsFromRowAcceptsDerivedRESTFields(t *testing.T) {
+	var row []*float64
+	if err := json.Unmarshal([]byte(`[1700000000,0.2,1.1,2.3,180,3,1013.2,20.5,45,1000,5,450,0.12,1,0,0,2.6,1,6.5,0.13,6.6,1]`), &row); err != nil {
+		t.Fatal(err)
+	}
+	if len(row) != restObsFields {
+		t.Fatalf("fixture has %d fields, want %d", len(row), restObsFields)
+	}
+	observation, err := DeviceObsFromRow(row)
+	if err != nil {
+		t.Fatalf("22-field REST row rejected: %v", err)
+	}
+	if observation.Epoch != 1700000000 || *observation.AirTempC != 20.5 || *observation.RainMm != 0.12 ||
+		*observation.BatteryV != 2.6 || *observation.ReportIntervalMin != 1 {
+		t.Fatalf("sensor fields shifted: %+v", observation)
+	}
+}
+
 func FuzzDeviceObsFromRow(f *testing.F) {
 	f.Add([]byte(`[1700000000,0.2,1.1,2.3,180,3,1013.2,20.5,45,1000,5,450,0,0,10,2,2.6,1]`))
+	f.Add([]byte(`[1700000000,0.2,1.1,2.3,180,3,1013.2,20.5,45,1000,5,450,0.12,1,0,0,2.6,1,6.5,0.13,6.6,1]`))
 	f.Add([]byte(`[null]`))
 	f.Add([]byte(`[]`))
 	f.Fuzz(func(t *testing.T, data []byte) {

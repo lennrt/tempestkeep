@@ -19,6 +19,12 @@ const (
 	MaxEpochSeconds = 253402300799
 )
 
+// restObsFields is the widest obs_st row the REST observations endpoint
+// documents. It appends four server-derived rain values to the 18 sensor
+// fields: 18 local-day rain, 19 Rain Check (NC) rain, 20 local-day NC rain,
+// and 21 precipitation analysis type. DeviceObs does not carry them.
+const restObsFields = 22
+
 // ErrInvalidObservation reports malformed or physically impossible input.
 var ErrInvalidObservation = errors.New("invalid observation")
 
@@ -80,11 +86,13 @@ type DeviceObs struct {
 }
 
 // DeviceObsFromRow validates and copies one Tempest obs_st row. JSON nulls and
-// missing trailing sensor values are retained as absent values. Unknown trailing
-// fields fail closed so a wire-format change cannot silently corrupt the archive.
+// missing trailing sensor values are retained as absent values. The documented
+// derived REST fields after the sensor fields are ignored. Unknown trailing
+// fields beyond those fail closed so a wire-format change cannot silently
+// corrupt the archive.
 func DeviceObsFromRow(row []*float64) (DeviceObs, error) {
-	if len(row) == 0 || len(row) > DeviceObsFields || row[0] == nil {
-		return DeviceObs{}, fmt.Errorf("%w: obs_st row must contain 1..%d fields and a timestamp", ErrInvalidObservation, DeviceObsFields)
+	if len(row) == 0 || len(row) > restObsFields || row[0] == nil {
+		return DeviceObs{}, fmt.Errorf("%w: obs_st row must contain 1..%d fields and a timestamp", ErrInvalidObservation, restObsFields)
 	}
 	if math.IsNaN(*row[0]) || math.IsInf(*row[0], 0) || math.Trunc(*row[0]) != *row[0] || *row[0] <= 0 || *row[0] > MaxEpochSeconds {
 		return DeviceObs{}, fmt.Errorf("%w: timestamp must be an integral epoch in 1..%d", ErrInvalidObservation, MaxEpochSeconds)
