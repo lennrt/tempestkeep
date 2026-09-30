@@ -260,7 +260,7 @@ func HeatIndexF(tF, rh float64) float64 {
 
 // WindChillF returns the NWS wind-chill temperature ("feels like" in the cold)
 // in °F from temperature (°F) and wind speed (mph). Wind chill is only defined
-// for cold air moving faster than a walk; at or above 50°F, or at 3 mph or less,
+// for cold air moving faster than a walk; above 50°F, or at 3 mph or less,
 // it returns the air temperature unchanged, matching the NWS convention.
 func WindChillF(tF, windMph float64) float64 {
 	if tF > 50 || windMph <= 3 {

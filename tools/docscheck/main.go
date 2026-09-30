@@ -32,7 +32,7 @@ var (
 
 	headingPattern       = regexp.MustCompile(`^(#{1,6})[ \t]+\S`)
 	inlineLinkPattern    = regexp.MustCompile(`!?\[[^\]\n]*\]\(([^)\n]+)\)`)
-	referenceLinkPattern = regexp.MustCompile(`^\[[^\]\n]+\]:[ \t]+(\S+)`)
+	referenceLinkPattern = regexp.MustCompile(`^\[[^\]\n]+\]:[ \t]+(.+)`)
 )
 
 type finding struct {
@@ -125,7 +125,7 @@ func markdownPaths(root string) ([]string, error) {
 			path := filepath.Join(dir, entry.Name())
 			if entry.IsDir() {
 				switch entry.Name() {
-				case ".git", "bin", "dist", "vendor":
+				case ".git", "bin", "dist", "vendor", "node_modules":
 					continue
 				}
 				if err := walk(path, depth+1); err != nil {
@@ -187,7 +187,6 @@ func (c *checker) checkFile(path string) {
 		c.add(path, 1, "file must use LF line endings")
 	}
 
-	inFence := false
 	fence := ""
 	previousHeading := 0
 	lineNumber := 0
@@ -197,15 +196,15 @@ func (c *checker) checkFile(path string) {
 		if strings.HasSuffix(line, " ") || strings.HasSuffix(line, "\t") {
 			c.add(path, lineNumber, "trailing whitespace")
 		}
-		if marker, ok := fenceMarker(trimmed); ok {
-			if !inFence {
-				inFence, fence = true, marker
-			} else if marker == fence {
-				inFence, fence = false, ""
+		marker, rest := fenceMarker(line)
+		if fence != "" {
+			if len(marker) >= len(fence) && marker[0] == fence[0] && strings.TrimSpace(rest) == "" {
+				fence = ""
 			}
 			continue
 		}
-		if inFence {
+		if marker != "" && (marker[0] != '`' || !strings.ContainsRune(rest, '`')) {
+			fence = marker
 			continue
 		}
 		if len(line) > maxLineBytes && !strings.HasPrefix(trimmed, "|") {
@@ -225,23 +224,35 @@ func (c *checker) checkFile(path string) {
 			c.checkLink(path, lineNumber, firstLinkField(match[1]))
 		}
 	}
-	if inFence {
+	if fence != "" {
 		c.add(path, lineNumber, "code fence is not closed")
 	}
 }
 
-func fenceMarker(line string) (string, bool) {
-	switch {
-	case strings.HasPrefix(line, "```"):
-		return "```", true
-	case strings.HasPrefix(line, "~~~"):
-		return "~~~", true
-	default:
-		return "", false
+// fenceMarker preserves the delimiter length. A closing fence must use the
+// same character, be at least as long, and have no trailing information string.
+func fenceMarker(line string) (marker, rest string) {
+	trimmed := strings.TrimLeft(line, " ")
+	if len(line)-len(trimmed) > 3 || len(trimmed) < 3 || (trimmed[0] != '`' && trimmed[0] != '~') {
+		return "", ""
 	}
+	n := 1
+	for n < len(trimmed) && trimmed[n] == trimmed[0] {
+		n++
+	}
+	if n < 3 {
+		return "", ""
+	}
+	return trimmed[:n], trimmed[n:]
 }
 
 func firstLinkField(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "<") {
+		if end := strings.IndexByte(raw, '>'); end >= 0 {
+			return raw[1:end]
+		}
+	}
 	fields := strings.Fields(raw)
 	if len(fields) == 0 {
 		return ""
@@ -258,7 +269,7 @@ func (c *checker) checkLink(source string, line int, target string) {
 		c.add(source, line, "link target is invalid")
 		return
 	}
-	if parsed.IsAbs() {
+	if parsed.IsAbs() || parsed.Host != "" {
 		if parsed.Scheme != "https" || parsed.User != nil || parsed.Host == "" {
 			c.add(source, line, "external links must use HTTPS without user information")
 		}
@@ -268,12 +279,13 @@ func (c *checker) checkLink(source string, line int, target string) {
 	if pathPart == "" {
 		return
 	}
-	decoded, err := url.PathUnescape(pathPart)
-	if err != nil || filepath.IsAbs(decoded) {
+	// url.Parse already decodes Path. Decoding it twice changes literal %xx
+	// filenames and can turn an encoded filename into a different path.
+	if filepath.IsAbs(pathPart) {
 		c.add(source, line, "local link path is invalid")
 		return
 	}
-	resolved := filepath.Clean(filepath.Join(filepath.Dir(source), filepath.FromSlash(decoded)))
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(source), filepath.FromSlash(pathPart)))
 	relative, err := filepath.Rel(c.root, resolved)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		c.add(source, line, "local link escapes the repository")

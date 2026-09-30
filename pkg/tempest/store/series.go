@@ -15,7 +15,7 @@ import (
 const calmThresholdMps = 0.5
 
 // WindSector is one 16-point compass sector of a wind rose. Pct is the share of
-// non-calm observations whose direction fell in this sector.
+// non-calm observations with a reported direction that fell in this sector.
 type WindSector struct {
 	Sector     string   `json:"sector"` // N, NNE, NE, ... NNW
 	Count      int64    `json:"count"`
@@ -83,11 +83,10 @@ func (s *Store) WindRose(ctx context.Context, startEpoch, endEpoch int64) (_ Win
 
 	var calm int64
 	if err := db.QueryRowContext(ctx, qryWindRoseCalm,
-		startEpoch, endEpoch, calmThresholdMps).Scan(&calm); err != nil {
+		calmThresholdMps, startEpoch, endEpoch).Scan(&calm, &rose.Obs); err != nil {
 		return rose, archiveFailure("read calm wind share", err)
 	}
 
-	rose.Obs = windy + calm
 	if rose.Obs > 0 {
 		rose.CalmPct = 100 * float64(calm) / float64(rose.Obs)
 	}
@@ -132,7 +131,8 @@ func (s *Store) Series(ctx context.Context, startEpoch, endEpoch, bucketSeconds 
 	if bucketSeconds < 60 || bucketSeconds > MaxRangeSeconds {
 		return nil, fmt.Errorf("%w: series bucket must be between 60 and %d seconds", ErrInvalidArgument, MaxRangeSeconds)
 	}
-	points := (endEpoch-startEpoch)/bucketSeconds + 1
+	// Count epoch-aligned buckets, including partial buckets at either end.
+	points := endEpoch/bucketSeconds - startEpoch/bucketSeconds + 1
 	if points > MaxSeriesPoints {
 		return nil, fmt.Errorf("%w: series can contain at most %d buckets", ErrInvalidArgument, MaxSeriesPoints)
 	}

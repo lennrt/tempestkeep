@@ -9,7 +9,7 @@ SELECT epoch/? AS b,
        COALESCE(SUM(strike_count), 0),
        MIN(CASE WHEN strike_count > 0 AND strike_dist_km > 0 THEN strike_dist_km END),
        MAX(CASE WHEN strike_count > 0 AND strike_dist_km > 0 THEN strike_dist_km END),
-       COUNT(*)
+       COUNT(strike_count)
 FROM obs_st
 WHERE epoch BETWEEN ? AND ?
 GROUP BY b

@@ -24,6 +24,7 @@ const (
 	// persisted after every chunk. Without it an interrupted seed looks finished
 	// on the next run (a watermark exists, so the collector switches to forward
 	// sync) and the older history below the interruption is never fetched.
+	// Zero means the walk reached the earliest supported epoch.
 	MetaBackfillCursor = "backfill_cursor"
 	// MetaBackfillComplete marks that a walk-back reached the start of history,
 	// so later runs skip the walk instead of re-probing empty windows.
@@ -211,6 +212,19 @@ func validateEpochRange(start, end int64) error {
 	return nil
 }
 
+func (b *Backfiller) fetchChunk(ctx context.Context, start, end int64) ([]model.DeviceObs, error) {
+	observations, err := b.fetcher.DeviceObservations(ctx, b.deviceID, start, end)
+	if err != nil {
+		return nil, err
+	}
+	for index, observation := range observations {
+		if observation.Epoch < start || observation.Epoch > end {
+			return nil, fmt.Errorf("%w: fetched observation %d is outside the requested time range", model.ErrInvalidObservation, index)
+		}
+	}
+	return observations, nil
+}
+
 // Result summarizes a forward backfill (BackfillRange) or a Sync.
 type Result struct {
 	Fetched   int   // observations the API returned across all chunks
@@ -254,7 +268,7 @@ func (b *Backfiller) backfillRange(ctx context.Context, start, end int64, maxChu
 	chunks := 0
 	for s := start; s <= end; {
 		e := min(s+b.chunk-1, end)
-		obs, err := b.fetcher.DeviceObservations(ctx, b.deviceID, s, e)
+		obs, err := b.fetchChunk(ctx, s, e)
 		if err != nil {
 			res.Resume = s
 			return res, fmt.Errorf("fetch observation chunk: %w", err)
@@ -334,7 +348,7 @@ func (b *Backfiller) backfillBackward(ctx context.Context, before, floor int64, 
 		if floor > 0 && start < floor {
 			start = floor
 		}
-		obs, err := b.fetcher.DeviceObservations(ctx, b.deviceID, start, end)
+		obs, err := b.fetchChunk(ctx, start, end)
 		if err != nil {
 			return res, fmt.Errorf("fetch observation chunk: %w", err)
 		}
@@ -479,6 +493,12 @@ func (b *Backfiller) Collect(ctx context.Context, now, backfillStart int64) (Sum
 		}
 		return Summary{Mode: "backfill", Fetched: r.Fetched, RowsAdded: r.RowsAdded}, err
 	}
+	if before, resume, err := b.seedCursor(ctx); err != nil {
+		return Summary{Mode: "seed"}, err
+	} else if resume {
+		r, err := b.seedWalk(ctx, before)
+		return Summary{Mode: "seed", Fetched: r.Fetched, RowsAdded: r.RowsAdded}, err
+	}
 	r, err := b.seedWalk(ctx, now) // walk back to the start of history
 	return Summary{Mode: "seed", Fetched: r.Fetched, RowsAdded: r.RowsAdded}, err
 }
@@ -504,7 +524,7 @@ func (b *Backfiller) seedCursor(ctx context.Context) (before int64, resume bool,
 		return 0, false, err
 	}
 	n, perr := strconv.ParseInt(v, 10, 64)
-	if perr != nil || n <= 0 || n > model.MaxEpochSeconds {
+	if perr != nil || n < 0 || n > model.MaxEpochSeconds {
 		return 0, false, fmt.Errorf("%w: %s is not a valid epoch", ErrInvalidCheckpoint, MetaBackfillCursor)
 	}
 	return n, true, nil
@@ -514,6 +534,19 @@ func (b *Backfiller) seedCursor(ctx context.Context) (before int64, resume bool,
 // chunk, so a Ctrl-C or crash mid-seed resumes on the next run. On exhaustion
 // it sets the complete marker (shared with the MCP backfill_archive tool).
 func (b *Backfiller) seedWalk(ctx context.Context, before int64) (BackwardResult, error) {
+	if before == 0 {
+		// The last chunk reached epoch zero, but reporting progress or writing
+		// the complete marker failed. Its cursor is already a terminal state.
+		return BackwardResult{Reached: 0, Exhausted: true}, b.writer.SetMeta(ctx, MetaBackfillComplete, "1")
+	}
+	// Record the intent before any observation can commit. If saving the next
+	// cursor fails, restarting safely replays from this earlier cursor.
+	if err := b.writer.SetMeta(ctx, MetaBackfillCursor, strconv.FormatInt(before, 10)); err != nil {
+		return BackwardResult{Reached: before}, err
+	}
+	if err := b.writer.SetMeta(ctx, MetaBackfillComplete, "0"); err != nil {
+		return BackwardResult{Reached: before}, err
+	}
 	progress := func(p Progress) error {
 		checkpointErr := b.writer.SetMeta(ctx, MetaBackfillCursor, strconv.FormatInt(p.Through, 10))
 		if b.progress == nil {

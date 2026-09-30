@@ -19,6 +19,7 @@ review; do not submit only a final source archive.
 ## Prerequisites
 
 - Go 1.27.0.
+- A Unix-like shell and make for the Makefile and shell scripts.
 - A C toolchain for race tests.
 - Network access to the Go module proxy for the first tool download.
 
@@ -111,6 +112,33 @@ Use short, direct sentences. Put a condition before the action. Use one term for
 one meaning. State prerequisites, exact commands, limits, results, ownership, and
 failure behavior. Do not add marketing claims or readiness claims without
 recorded evidence.
+
+Use [SimpleEnglish](https://github.com/AminBlg/SimpleEnglish) in Plain mode for
+prose reviews. Preserve commands, identifiers, units, quoted errors, and facts.
+See [the query examples](docs/querying.md) for explicit date and missing-value rules.
+
+## Specifications
+
+Read the relevant requirements in [openspec/specs](openspec/specs) before changing
+behavior. Create or update an active change with a proposal, scenarios, design,
+and testable tasks. Follow [the OpenSpec guide](docs/openspec.md).
+
+OpenSpec uses development-only Node.js dependencies. Building the Go application
+does not require Node.js. For specification changes, use Node.js 20.19.0 or later
+and run these additional checks from the repository root:
+
+```sh
+npm ci --ignore-scripts --no-audit --no-fund
+npm run spec:check
+```
+
+CI runs these checks separately from `make verify`. OpenSpec validation checks
+document structure; the behavior scenarios still need Go tests. Keep active
+changes available during review. Archive them after acceptance and completion.
+
+A spelling or link correction does not need a new behavior proposal. Run
+`make docs-check` for such edits. The ADR requirements still apply to public,
+wire, storage, security, and configuration changes.
 
 ## Publication
 

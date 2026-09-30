@@ -29,3 +29,5 @@ List exact additional commands and results.
 
 - [ ] User, operator, API, and release documentation is updated or not needed.
 - [ ] `make docs-check`
+- [ ] Behavior changes include an OpenSpec proposal and tested scenarios.
+- [ ] `npm run spec:check` passes when specifications change.

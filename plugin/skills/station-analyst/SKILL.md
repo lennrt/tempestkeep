@@ -1,82 +1,144 @@
 ---
 name: station-analyst
 description: >-
-  Analyze a local WeatherFlow Tempest archive through the TempestKeep MCP tools.
-  Use for records, extremes, comparisons, patterns, gardening, solar, laundry,
-  running, and other station-history questions.
+  Analyze a local WeatherFlow Tempest archive through TempestKeep MCP tools.
+  Use for station records, extremes, comparisons, weather patterns, and questions
+  about gardening, sunlight, or outdoor activities that depend on station data.
 ---
 
-Analyze data from the user's station. The `tempestkeep` MCP server provides a local
-SQLite archive of one-minute observations and live tools. Map each question to the
-smallest query that can answer it.
+Use data from the user's station. The archive stores one device's observations.
+Choose the smallest query that answers the question. Discover available tools
+before using a workflow that needs live access or archive writes.
 
-## Pick the cheapest tool that answers the question
+Before comparing live weather with archive history, call `station_info`.
+If it omits live station identity, describe the archive separately. Do not
+assume that a configured archive belongs to the selected live station.
 
-| Question shape | Tool |
+## Select a tool
+
+| Question | Tool |
 |---|---|
-| Extremes across all time | `records` |
-| "This date over the years" | `this_day_in_history` |
-| Month-vs-month, year-vs-year | `period_summary` |
-| Day-by-day inside a window | `daily_summary` |
-| Wind direction/strength patterns | `wind_rose` (accepts a date range; compare seasons by calling it twice) |
-| "When is it usually coldest/warmest/windiest?" (time of day) | `climatology` (the average day, hour by hour) |
-| Heating/cooling energy demand, growing-season heat units | `degree_days` (HDD/CDD/GDD, configurable bases) |
-| Frost/hot-day counts, tropical nights, year-over-year trend | `climate_indices` (pass yearly=true) |
-| "Is a storm coming?" / barometer rising or falling | `pressure_trend` (3-hour tendency) |
-| Rainfall totals, dry-spell / wet-spell length, wettest day | `rain_stats` |
-| "Is this month unusual?" / the monthly baseline | `climate_normals`, then compare a `period_summary` month against it |
-| Time series for a chart or trend | `get_observations` (auto-downsamples) |
-| A question that no shaped tool supports | `query_sql` |
+| Coverage, freshness, and large gaps | `archive_status` |
+| Extremes across the archive | `records` |
+| This calendar date across years | `this_day_in_history` |
+| Monthly or yearly comparisons | `period_summary` |
+| Daily values within a range | `daily_summary` |
+| Wind direction and speed distribution | `wind_rose` |
+| Typical temperature or wind by local hour | `climatology` |
+| Heating, cooling, or growing degree-days | `degree_days` |
+| Frost, hot-day, and tropical-night counts | `climate_indices` |
+| Observed pressure change | `pressure_trend` |
+| Rain totals and wet or dry spells | `rain_stats` |
+| Monthly baseline across available years | `climate_normals` |
+| Solar radiation and UV | `solar_stats` |
+| Missing sensor readings | `sensor_health` |
+| A time series for a chart | `get_observations` |
+| A query that no dedicated tool supports | `query_sql` |
 
 Before the first `query_sql` call, read `tempest://archive/schema` and
-`tempest://archive/data-dictionary`. They define columns, units, and limits.
+`tempest://archive/data-dictionary`. Use the resource's exact column names.
+If a result reports truncation, narrow or aggregate the query.
 
-## Rules that keep answers correct
+## Keep units and dates explicit
 
-- **Raw tables use SI units. Shaped tools return US display units.** `obs_st`
-  stores °C, m/s, mm, and millibars. When you use `query_sql`, convert output and
-  name its units.
-- **`epoch` is UTC seconds. Calendar questions use local days.** Prefer shaped
-  tools for calendar queries. In raw SQL, account for the local UTC offset.
-- **Rain (`rain_mm`) and lightning (`strike_count`) are per-minute increments:**
-  SUM them over a window; never average or MAX them for totals.
-- **NULL means a missing sensor value.** Use aggregates that skip NULL. Check
-  `archive_status` before stating that an event never happened.
-- A "rainy day" is ≥ 0.01 in; "calm" wind is < ~1.1 mph (direction is noise below
-  that; `wind_rose` already excludes it).
+Name the units in every answer. Raw SQL returns SI values: °C, m/s, mm, and
+millibars. Most history tools convert those measurements to °F, mph, inches,
+and inHg. Solar radiation remains W/m².
+
+Treat `epoch` as UTC seconds. Use dedicated calendar tools for local dates.
+Calendar tools use the server's process timezone, which need not match the
+station. Do not substitute a fixed UTC offset across daylight-saving changes.
+
+For history queries, `end` includes the full local end day. For
+`backfill_archive`, `end` is exclusive local midnight. Use the returned range
+when describing results.
+
+Rain and lightning values are increments per report interval. Sum `rain_mm`
+and `strike_count` for totals. Do not average them or multiply them by interval
+length. Use `MAX(wind_gust)` for peak gusts and `AVG(wind_avg)` for mean wind.
+
+For `wind_rose`, sector percentages use non-calm readings with a known
+direction. The calm percentage uses every reading with a wind speed.
+Missing directions therefore reduce the evidence for directional comparisons.
+
+Treat solar insolation as an estimate from irradiance and reported duration.
+Missing or zero durations contribute no energy, but sensor peaks remain
+available. Each whole interval belongs to its observation timestamp's local
+day. The estimate does not clip boundaries or subtract overlaps.
+
+For `get_observations`, gust and UV values are bucket maxima. Wind and pressure
+are bucket means. Rain and lightning are bucket totals. Read the applied bucket
+width before describing a chart's resolution.
+
+## Account for missing observations
+
+Call `archive_status` before historical comparisons. Its gap list reports at
+most ten gaps longer than an hour. A lack of listed gaps does not prove that
+all minutes or sensors are present.
+
+Treat a missing field or SQL `NULL` as unavailable. Use `sensor_health` for
+continuous sensors. Count non-null `rain_mm` or `strike_count` values in SQL
+when an event total or spell depends on coverage.
+Do not replace missing observations with zero. Some summary totals use zero
+when sensor readings are absent, so compare them with coverage evidence.
+
+A day without rain or strike readings breaks the corresponding spell.
+One valid reading lets a day qualify, so spells do not prove complete coverage.
+`comfort_stats` omits hot apparent temperatures without humidity and cold
+apparent temperatures without wind. Its extremes use 15-minute means.
+
+Include observation counts when ranking periods. Compare the same elapsed
+dates for a partial current month and earlier years. Describe `records` as
+archive records, because missing history can hide a larger event.
+
+Describe `climate_normals` as the baseline of the available archive. Do not
+call it a standard long-term climate normal. Explain how partial years,
+gaps, or station changes limit an inferred temperature trend.
+
+Use `forecast` for expected weather when live access exists. A pressure trend
+alone does not establish that a storm will occur. Archived pressure is station
+pressure, while live conditions can use sea-level pressure.
+Live conditions include an archive trend only when station identity matches.
+For either source, the latest pressure reading must be no later than the
+displayed observation and less than one hour older. An absent trend does not
+mean steady pressure. `pressure_trend_3h_inhg` is a normalized three-hour rate;
+the separate `pressure_trend` tool exposes the actual historical sample span.
 
 ## Worked examples
 
-**"What was the windiest day of the year?"** → `query_sql`: group by local day,
-`MAX(wind_gust)` for the peak and `AVG(wind_avg)` for sustained wind; report both,
-they answer different ideas of "windiest":
+For "Which day had the strongest gust in 2025?", call `daily_summary`:
 
-```sql
-SELECT date(epoch, 'unixepoch', 'localtime') AS day,
-       ROUND(MAX(wind_gust) * 2.23694, 1) AS peak_gust_mph,
-       ROUND(AVG(wind_avg) * 2.23694, 1)  AS sustained_mph
-FROM obs_st WHERE epoch >= strftime('%s', 'now', '-1 year')
-GROUP BY day ORDER BY peak_gust_mph DESC LIMIT 5;
+```json
+{"start": "2025-01-01", "end": "2025-12-31"}
 ```
 
-**"When do my solar panels get sun?"** → `query_sql` over
-`solar_wm2` grouped by hour of local day for the last 90 days; report the peak-hours
-window and how it shifts by season (repeat for a winter window if the archive is
-deep enough). The same shape answers "what time of day is UV highest?" (use `uv`,
-and mention the UV 8+ hours for sunscreen rather than panels).
+Rank days by `peak_gust_mph` and include `obs`. For the selected day, call
+`get_observations` with matching `start` and `end` and `bucket_minutes: 60`.
+Report peak gust separately from average wind. If the archive lacks part of
+2025, state the covered dates.
 
-**"When can I plant tomatoes?"** → report frost risk and warmth: last
-frost date (`query_sql`: latest spring day per year with `MIN(air_temp_c) <= 0`),
-overnight lows the past two weeks (`daily_summary`), and the forecast for cold
-snaps. Answer the gardening question the data question sits inside.
+For "Was June wetter this year?", call `period_summary` for June in each year.
+Use explicit first and last dates and `period: "month"`. Compare `rain_in`,
+`rainy_days`, `days_observed`, and `obs`. If either month is incomplete, state
+that the totals cover different amounts of data.
 
-**"Has it been a dry month?"** → `period_summary` for this month across years:
-rain total and rainy-day count against the same month in prior years beats a bare
-number.
+For "When does my yard get the most sun?", use `solar_stats` for the range.
+Use `get_observations` or bounded SQL when hourly detail is needed. Describe
+the station's measured sunlight. Do not claim that it measures shade across
+the whole yard or electrical output from solar panels.
 
-## Answer style
+For "What does the station show about spring frost?", query daily lows for
+spring dates across available years. Keep the frost threshold explicit.
+Compare recent lows with the forecast when live access exists. State the
+archive's coverage instead of promising a frost-free planting date.
 
-Give the answer first. Then give the supporting numbers. Use small tables for
-rankings. Use sentences for other results. Write dates as "March 14, 2025". If
-the archive cannot support the answer, state the missing range or coverage gap.
-Offer `/tempestkeep:build-archive` when more history can resolve it.
+## Write the answer
+
+Give the answer first, followed by the supporting numbers, dates, and units.
+Use small tables for rankings. Distinguish observations, calculated values,
+and forecasts. For current conditions, include the source and timestamp.
+
+If the archive cannot support the answer, state the missing range or sensor
+readings. Offer `/tempestkeep:build-archive` only when historical collection
+can address the gap. Do not imply that backfill can recover data absent from
+the upstream API.
