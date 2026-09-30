@@ -127,6 +127,7 @@ const (
 	// persisted after every chunk. Without it an interrupted seed looks finished
 	// on the next run (a watermark exists, so the collector switches to forward
 	// sync) and the older history below the interruption is never fetched.
+	// Zero means the walk reached the earliest supported epoch.
 	MetaBackfillCursor = "backfill_cursor"
 	// MetaBackfillComplete marks that a walk-back reached the start of history,
 	// so later runs skip the walk instead of re-probing empty windows.
@@ -520,8 +521,8 @@ type SolarStats struct {
 	MaxIlluminanceDay string   `json:"max_illuminance_day,omitempty"`
 	SunniestDay   string   `json:"sunniest_day,omitempty"`
 	SunniestDayMJ *float64 `json:"sunniest_day_mj,omitempty"`
-	// AvgDailyInsolationMJ averages the daily insolation over days that carried at
-	// least one solar reading, so a fully dark-sensor day doesn't dilute it.
+	// AvgDailyInsolationMJ averages the daily estimate over days with at least one
+	// solar reading and a positive reported interval. Reported zero solar counts.
 	AvgDailyInsolationMJ *float64 `json:"avg_daily_insolation_mj,omitempty"`
 	TotalInsolationMJ    float64  `json:"total_insolation_mj"`
 }

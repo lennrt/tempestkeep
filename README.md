@@ -8,14 +8,14 @@
 [![Go Reference][docs-badge]][go-docs]
 [![GitHub stars][stars-badge]][stars]
 
-**Your weather station, available to your agent.**
-
 TempestKeep is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)
-server for WeatherFlow Tempest. Give an agent live conditions, forecasts, and a
-queryable local history. It can build the archive itself, resume interrupted
-collection, and answer historical questions from SQLite.
+server and command-line tool for WeatherFlow Tempest. An MCP client can request
+live conditions, forecasts, and historical queries. TempestKeep can collect
+history into a local SQLite archive and resume interrupted collection.
 
-One Go binary. MCP over stdio. A local archive you can also inspect with the CLI.
+One Go executable serves MCP over stdio, the client's standard input and output.
+The same executable provides a terminal dashboard, reports, and CSV or JSON Lines
+exports. An existing archive works without a WeatherFlow token.
 
 [![MCP discovery, archive backfill, chained queries, and offline reuse][mcp-demo]][mcp-video]
 
@@ -28,8 +28,8 @@ real MCP server. No LLM or WeatherFlow account is needed to replay it.
 
 ## What your agent can do
 
-With live access and a writable archive, TempestKeep exposes **29 typed tools,
-2 resources, and 3 prompts**. Each tool has an input schema and structured output.
+With live access and a writable archive, TempestKeep exposes 29 typed tools,
+2 resources, and 3 prompts. Each tool has an input schema and structured output.
 
 | Ask your agent | MCP workflow |
 |---|---|
@@ -48,12 +48,13 @@ Capabilities follow configuration:
 | Inputs | Available operations |
 |---|---|
 | token | live conditions, station metadata, and forecast |
-| archive | local observations, summaries, records, and read-only SQL |
+| archive | local observations, archive status, summaries, records, and read-only SQL |
 | token and writable archive | bounded archive backfill and sync |
 
-Use `--read-only` or `TEMPEST_READ_ONLY=true` to remove archive write tools.
-SQL reads are bounded and enforced by a read-only database handle. Backfill
-calls have bounded work and persist a resume cursor between calls.
+Use `--read-only` or `TEMPEST_READ_ONLY=true` to remove MCP archive write tools.
+Live API reads remain available when a token exists. SQL queries use a read-only
+database handle and limits on time, rows, and bytes. Open-ended backfill calls
+save progress between bounded batches.
 
 See the [MCP guide](docs/mcp.md) for configuration, capabilities, and limits.
 
@@ -61,9 +62,10 @@ See the [MCP guide](docs/mcp.md) for configuration, capabilities, and limits.
 
 ### Build
 
-You need **Go 1.27.0**, a local filesystem for SQLite, and a WeatherFlow personal
-access token for live data or collection. An existing archive works without a
-token. The normal build is pure Go; race tests need a C toolchain.
+You need Go 1.27.0 and a local filesystem for SQLite. Live data and collection
+also need a WeatherFlow personal access token. The build commands below use
+`make` and a Unix-like shell. The normal build uses pure Go. Race tests need
+a C toolchain.
 
 ```sh
 git clone https://github.com/lennrt/tempestkeep.git
@@ -75,10 +77,14 @@ make build
 The executable is `bin/tempestkeep`. Use its absolute path in a desktop MCP
 client, or put it on that client's `PATH`.
 
+For a build without `make`, run `go build -o bin/tempestkeep ./cmd/tempestkeep`.
+On native Windows, use `bin/tempestkeep.exe` as the output filename and client
+command. Direct Go builds use the module version metadata when Go supplies it.
+
 ### Configure the MCP client
 
 For clients that use an `mcpServers` configuration, add the following to the
-client's **private local configuration**. Replace the paths, token placeholder,
+client's private local configuration. Replace the paths, token placeholder,
 and timezone with your own values:
 
 ```json
@@ -101,15 +107,23 @@ Use your client's secret store if it provides one. Keep credentials out of Git
 and command arguments. Clients with a different configuration format need the
 same command, arguments, and environment values.
 
-Restart or reconnect the MCP client, then ask it to **build your station's local
-archive**. With a token and database path, TempestKeep creates the archive and
-exposes the backfill tools. For an existing archive without live access, omit
-`TEMPEST_TOKEN` and add `--read-only` to `args`.
+Restart or reconnect the MCP client, then ask it to build your station's local
+archive. With a token and explicit database path, TempestKeep creates the archive
+and exposes the backfill tools. Collection happens when the client calls those
+tools. Starting the server does not install a background collector.
+
+For an existing archive without live access, omit `TEMPEST_TOKEN` and add
+`--read-only` to `args`. Also remove any token inherited from the process
+environment or loaded from `.env`. The server reads `.env` from its working
+directory, which can differ from your terminal's directory.
+
+If the token can access several devices, read the
+[device selection rules](docs/mcp.md#capabilities) before collecting.
 
 The host launches `tempestkeep mcp` and exchanges JSON-RPC over stdin/stdout.
 Diagnostics go to stderr. SIGINT and SIGTERM cancel work and close the archive.
-The archive remains local; tool results are delivered to the connected MCP
-client and may be sent to the model that client uses.
+The archive remains local. Tool results go to the connected MCP client, which
+can send them to its model provider.
 
 The optional [Claude Code plugin](plugin/README.md) uses the same server.
 
@@ -122,8 +136,8 @@ archive. No real token or model provider is used:
 make mcp-demo
 ```
 
-The demo discovers capabilities, builds 45 days of history, chains a daily
-summary into an hourly query, and reconnects with no token in read-only mode.
+The demo discovers capabilities and builds 45 days of history. It uses a daily
+summary to select an hourly query, then reconnects without a token in read-only mode.
 It removes its temporary archive and stops the synthetic API when finished.
 
 To record the GIF and MP4 with [Charm's VHS][vhs], install VHS v0.11.0, `ttyd`,
@@ -148,8 +162,10 @@ the interactive setup wizard, then collect history and open the dashboard:
 ./bin/tempestkeep explore
 ```
 
-For manual setup, copy `.env.example` to `.env`, set `TEMPEST_TOKEN`, and restrict
-the file to the current user with `chmod 600 .env`.
+For manual setup on Unix-like systems, copy `.env.example` to `.env` and run
+`chmod 600 .env` before entering the token. Commands read that file from their
+current working directory. Use the [CLI guide](cmd/tempestkeep/README.md) for
+configuration, collection, protected exports, and report examples.
 
 ```text
 tempestkeep setup          Configure the token and archive.
@@ -171,23 +187,26 @@ Machine-readable commands keep data on stdout and diagnostics on stderr.
 
 ## Terminal controls
 
-The current-conditions card needs 61 columns; the explorer needs 68. Narrower
-windows show a resize notice rather than a broken border. On short terminals,
-use **Up/Down** (or **k/j**) and **Page Up/Page Down** to scroll. A position hint
+The current-conditions card needs 61 columns. The explorer needs 68. Narrower
+windows show a resize notice. On short terminals,
+use Up/Down (or k/j) and Page Up/Page Down to scroll. A position hint
 appears when content extends beyond the screen. Resizing returns to the top.
 
-In `now`, **r** refreshes or retries. In `explore`, **Enter** refreshes or retries,
-**Left/Right** (or **h/l**) scrubs periods, **d/w/m/y/r** selects a view, **Tab**
-cycles the month/year metric, and **g/Home** returns to the latest period.
-**q**, **Esc**, and **Ctrl+C** exit either dashboard.
+In `now`, `r` refreshes or retries. In `explore`, Enter refreshes or retries,
+Left/Right (or h/l) moves between periods, `d/w/m/y/r` selects a view, and Tab
+cycles the month/year metric. The `g` or Home key returns to the latest period.
+The `q`, Esc, and Ctrl+C keys exit either dashboard.
 
-Source builds without release metadata identify as `v0.2.0-dev`. See
-[CHANGELOG.md](CHANGELOG.md) for the pending minor-version changes.
+`tempestkeep version` reports the build's injected version, then Go's module
+version when available. If neither exists, it falls back to `v0.2.0-dev`.
+`make build` injects a version from Git tags or that development fallback.
+See [CHANGELOG.md](CHANGELOG.md) for the pending minor-version changes.
 
 ## Archive behavior
 
-Each archive belongs to one device. TempestKeep rejects a second device because
-mixed rows would invalidate rain, wind, and temperature aggregates.
+Each archive belongs to one Tempest device. Collection supports `obs_st`
+observations from Tempest ST hardware. TempestKeep rejects another device's
+rows because mixed observations invalidate rain, wind, and temperature totals.
 
 Collection requests at most five days per API call. Each chunk is committed in
 one transaction. Observation inserts use the `(device_id, epoch)` key, so replay
@@ -195,32 +214,41 @@ does not create duplicate rows. Open-ended collection stores a cursor after each
 committed chunk and resumes from that cursor after interruption.
 
 The default `tempestkeep collect` run creates a timestamped backup after a
-successful checkpoint. A backup is first copied to a private temporary file and
-then linked into place without overwriting an existing snapshot. Set
-`--backup-keep` from 0 through 365. A value of 0 disables backups.
+successful checkpoint. Backups live in the `backups` directory beside the
+archive. A private temporary copy becomes a snapshot without replacing an
+existing file. Set `--backup-keep` from 0 through 365. Zero disables backups.
+MCP collection does not create these snapshots.
 
 Keep the active database on a local filesystem. Stop writers before copying the
 database. Move a completed backup or export between machines. Do not place an
 active WAL database in a cloud-synchronized folder.
 
-The archive stores SI units. The CLI and MCP display layers convert values when
-they promise US units. Calendar summaries use the process timezone. Set `TZ` to
-the station's IANA timezone before running calendar reports on a host with a
-different timezone.
+The archive stores SI units. Default exports and raw SQL retain those units.
+History tools and CLI reports use US units for temperature, wind, pressure,
+and rain. Every result remains limited by available observations and sensor
+readings. See [query examples and interpretation](docs/querying.md).
+
+Calendar summaries use the process timezone. On Unix-like systems, set `TZ`
+to the station's IANA timezone before starting the process. Native Windows uses
+the host timezone. See the [timezone rules](docs/querying.md#dates-and-timezones)
+before comparing reports across hosts.
 
 ## Security and privacy
 
 Treat these files as sensitive:
 
-- `.env` and access tokens;
-- the SQLite archive, WAL, and shared-memory files;
-- backups and exports; and
-- terminal output that lists station, device, coordinate, or serial data.
+- `.env` and access tokens.
+- The SQLite archive, WAL, and shared-memory files.
+- Backups and exports.
+- Terminal output that lists station, device, coordinate, or serial data.
 
-These paths are ignored by Git. The application requests owner-only permissions
-where the platform supports them. See [SECURITY.md](SECURITY.md) for private
-reporting guidance and [docs/threat-model.md](docs/threat-model.md) for trust
-boundaries, controls, and residual risks.
+The repository ignores common archive and configuration paths. A custom path
+or export filename can fall outside those rules. The application requests
+owner-only permissions where the platform supports them. A shell redirect
+creates its own output file and controls that file's permissions.
+
+See [SECURITY.md](SECURITY.md) for private reporting and the
+[threat model](docs/threat-model.md) for controls and residual risks.
 
 ## Verification
 
@@ -236,7 +264,7 @@ make demo-smoke     # real MCP demo against synthetic data
 make race
 make fuzz           # bounded fuzz smoke tests
 make lint
-make workflows       # GitHub Actions syntax and semantics
+make workflows      # GitHub Actions syntax and semantics
 make generated      # public API snapshot
 make vuln
 make licenses
@@ -256,24 +284,29 @@ make live-smoke
 unset TEMPEST_TOKEN
 ```
 
-The command lists devices, fetches current conditions and a forecast, collects
-one bounded history range, reads the temporary archive without a token, and then
-deletes the archive. It discards API output. Do not run it with a production
-token.
+The command lists devices, fetches current conditions and a forecast, and collects
+one bounded history range. It reads the temporary archive without a token, then
+deletes that archive. It discards API output. Do not run it with a production token.
 
-CI runs on pushes to `main`, pull requests, and manual dispatch. It uses Ubuntu
-runners and cancels obsolete runs. Demo recording and release qualification are
-manual. Release qualification builds a snapshot and does not publish it.
+CI runs on pushes to `main`, pull requests, and manual dispatch. Ubuntu runs
+the full Go checks. macOS and Windows run native tests, documentation checks,
+and pure-Go builds. A separate job validates the OpenSpec requirements.
+CI cancels obsolete runs.
+
+Demo recording and release qualification are manual. Release qualification
+builds a snapshot and does not publish it. OpenSpec's Node.js dependency is
+development tooling and is not required to build or run TempestKeep.
 
 Use the [documentation index](docs/README.md) to find command guides, design
 records, security evidence, support policy, and release procedures. See
-[CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change.
+[CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change. The
+[OpenSpec workflow](docs/openspec.md) tracks proposed behavior and review evidence.
 
 ## Verification scope
 
 - The repository checks do not include a production load test or formal
   verification.
-- No Antithesis run has been launched or recorded.
+- No Antithesis run was launched or recorded.
 - Live behavior depends on the WeatherFlow service and the permissions of the
   supplied token.
 - CodeQL, dependency review, and some repository security features can require
@@ -286,6 +319,9 @@ English reports and contributions are welcome. See [SUPPORT.md](SUPPORT.md)
 for useful diagnostics and [CONTRIBUTING.md](CONTRIBUTING.md) for the pull
 request process, coding rules, and required tests. Report vulnerabilities
 privately using [SECURITY.md](SECURITY.md).
+
+For connection failures, missing tools, interrupted collection, and unexpected
+reports, start with [troubleshooting](docs/troubleshooting.md).
 
 The OpenSSF badge above displays the live status of the existing project entry.
 The [OpenSSF evidence guide](docs/openssf.md) maps the Passing criteria to the

@@ -18,6 +18,9 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/lennrt/tempestkeep/pkg/tempest/api"
+	"github.com/lennrt/tempestkeep/pkg/tempest/model"
 )
 
 const (
@@ -195,14 +198,25 @@ func handleDeviceObs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "time_start/time_end required", http.StatusBadRequest)
 		return
 	}
+	if start < 0 || end < start || end > model.MaxEpochSeconds || end-start >= int64(api.MaxDeviceWindow/time.Second) {
+		http.Error(w, "time range must be ordered and span at most five days", http.StatusBadRequest)
+		return
+	}
 	// History exists for the last 45 days; earlier windows return empty, which
 	// is how a backward-walking backfill discovers that history has ended.
-	oldest := time.Now().AddDate(0, 0, -45).Unix()
+	now := time.Now()
+	oldest := now.AddDate(0, 0, -45).Unix()
 	if start < oldest {
 		start = oldest
 	}
-	var obs [][]any
-	for e := start - start%60; e <= end && e <= time.Now().Unix(); e += 60 {
+	// Round forward to the first complete minute in the requested window.
+	// Rounding down would manufacture an observation before time_start.
+	first := start
+	if remainder := first % 60; remainder != 0 {
+		first += 60 - remainder
+	}
+	obs := make([][]any, 0)
+	for e := first; e <= end && e <= now.Unix(); e += 60 {
 		m := modelAt(time.Unix(e, 0))
 		row := make([]any, 18)
 		row[0] = e
@@ -227,7 +241,7 @@ func handleDeviceObs(w http.ResponseWriter, r *http.Request) {
 		row[17] = 1    // report interval, minutes
 		obs = append(obs, row)
 	}
-	writeJSON(w, map[string]any{"obs": obs})
+	writeJSON(w, map[string]any{"device_id": deviceID, "type": "obs_st", "obs": obs})
 }
 
 func handleForecast(w http.ResponseWriter, _ *http.Request) {

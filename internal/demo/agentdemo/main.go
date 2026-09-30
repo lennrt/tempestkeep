@@ -284,7 +284,7 @@ func actWindRose(ctx context.Context, cs *mcp.ClientSession) error {
 	top, second := rose.Sectors[0], rose.Sectors[1]
 	result(fmt.Sprintf("%s %.0f%% · %s %.0f%% · calm %.0f%%", top.Sector, top.Pct, second.Sector, second.Pct, rose.CalmPct))
 
-	answer := fmt.Sprintf("Mostly %s: %.0f%% of non-calm samples, with %s next at %.0f%%.", top.Sector, top.Pct, second.Sector, second.Pct)
+	answer := fmt.Sprintf("Mostly %s: %.0f%% of non-calm samples with a known direction, with %s next at %.0f%%.", top.Sector, top.Pct, second.Sector, second.Pct)
 	if top.AvgMph != nil {
 		answer += fmt.Sprintf(" It averages %.0f mph from that direction, and the air is calm %.0f%% of the time.", *top.AvgMph, rose.CalmPct)
 	}

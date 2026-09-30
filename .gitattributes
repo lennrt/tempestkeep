@@ -1,3 +1,16 @@
 # Go and SQL sources stay LF everywhere; stops gofmt/CRLF churn on Windows.
 *.go text eol=lf
 *.sql text eol=lf
+
+# Documentation checks and POSIX scripts require LF on every checkout.
+*.md text eol=lf
+*.sh text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.txt text eol=lf
+*.tape text eol=lf
+.env.example text eol=lf
+Makefile text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf

@@ -1,32 +1,42 @@
 ---
-description: "Full weather report: now, the week ahead, and today in your station's history"
+description: "Weather report from available live conditions, forecasts, and station history"
 argument-hint: ""
 ---
 
-Produce a weather report from the user's station with the `tempestkeep` MCP tools.
-Gather the data before writing. Do not stream raw tool results.
+Produce a weather report from the user's station with the `tempestkeep` MCP
+tools. Discover the available tools first. Gather the data before writing,
+and do not stream raw tool results.
 
-1. `current_conditions`: the now.
-2. `forecast`: today plus the next few days.
-3. `this_day_in_history`: this calendar day across every archived year.
-4. `records`: to flag anything today is close to.
+1. Call `current_conditions`. Read `source`, `time`, and `age_seconds` before
+   describing the reading as current.
+2. If live tools are available, call `forecast` for the next three days.
+3. If archive tools are available, call `station_info`, `archive_status`, and
+   `this_day_in_history` for historical context.
+4. If archive tools are available, call `records` to compare recorded extremes.
 
-Format the report exactly like this:
+Write a short report with these parts when data is available:
 
-```
-## ⛅ <station name> · <weekday, local time>
+- Latest conditions: temperature, apparent temperature, wind, and humidity.
+- Forecast: each day's high, low, conditions, and rain chance.
+- History: this calendar date across available years, with covered years and
+  sample counts where useful.
+- Observed extremes: a recent value near a recorded extreme, only when the
+  measurements and units are comparable.
 
-**Now:** <temp, feels-like, conditions, wind, humidity; one sentence.>
+Use the units returned by each tool and round temperatures to whole degrees.
+Include the observation's time and source. If the reading comes from an old
+archive row, label it as archived conditions rather than current weather.
 
-**Next 3 days:** <one line per day: weekday, hi/lo, conditions, rain chance.>
+If `station_info` omits live station identity, describe archive history
+separately from live conditions and forecasts. Do not claim that they describe
+the same station. A missing pressure trend does not mean steady pressure.
 
-**This day in history:** <2–3 sentences: typical temps for this date across the
-archive, the record high/low for the date and which year, anything unusual.>
+If live tools are absent, omit the forecast and state that live access is not
+configured. If archive tools are absent, omit historical comparisons and state
+that history needs an archive. Refer to `/tempestkeep:setup` when configuration
+can supply the missing capability.
 
-**Watch for:** <only if warranted: a record within ~3°F, gusts near the all-time
-peak, first rain in N days. Omit the section entirely when nothing stands out.>
-```
-
-Use the units the tools return (°F, mph, in, inHg). Round temperatures to
-whole degrees. If the archive tools are unavailable, produce the live-only sections
-and note in one line that history needs an archive (`/tempestkeep:setup` builds one).
+Do not treat missing observations as evidence that an event did not occur.
+Do not infer a dry spell from `records` alone. Use `rain_stats` and coverage
+before reporting a count of rain-free days. Distinguish forecasts from stored
+observations throughout the report.

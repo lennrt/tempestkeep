@@ -6,6 +6,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/lennrt/tempestkeep/internal/archiveidentity"
 	"github.com/lennrt/tempestkeep/pkg/tempest/api"
 	"github.com/lennrt/tempestkeep/pkg/tempest/model"
 	"github.com/lennrt/tempestkeep/pkg/tempest/store"
@@ -37,8 +38,8 @@ type ConditionsOut struct {
 	RainTodayIn         *float64 `json:"rain_today_in,omitempty"`
 	LightningStrikes1hr *int     `json:"lightning_strikes_1hr,omitempty"`
 	LightningLastMi     *float64 `json:"lightning_last_distance_mi,omitempty"`
-	PressureTrend       string   `json:"pressure_trend,omitempty"` // rising/falling/steady over the last 3h (archive-derived)
-	PressureTrend3hInHg *float64 `json:"pressure_trend_3h_inhg,omitempty"`
+	PressureTrend       string   `json:"pressure_trend,omitempty"`         // rising/falling/steady from the archive's normalized 3-hour rate
+	PressureTrend3hInHg *float64 `json:"pressure_trend_3h_inhg,omitempty"` // inHg per 3 hours, normalized from the actual sample span
 	Note                string   `json:"note,omitempty"`
 }
 
@@ -115,7 +116,7 @@ func registerTools(srv *mcp.Server, live *liveSource, st *store.Store) {
 		mcp.AddTool(srv, &mcp.Tool{
 			Name:        "current_conditions",
 			Title:       "Current conditions",
-			Description: "Return the latest conditions. Live data is preferred when a token is configured. An archive supplies fallback data and a 3-hour pressure trend.",
+			Description: "Return the latest conditions, preferring live data when available. An archive supplies fallback data; matching recent pressure history can add a normalized three-hour pressure rate.",
 			Annotations: conditionsAnnotations(live),
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, _ NoArgs) (*mcp.CallToolResult, ConditionsOut, error) {
 			// Prefer live; on any live failure fall back to the archive if we
@@ -124,7 +125,7 @@ func registerTools(srv *mcp.Server, live *liveSource, st *store.Store) {
 				if s, err := live.resolveStation(ctx); err == nil {
 					if o, err := live.client.LatestStationObs(ctx, s.StationID); err == nil {
 						out := liveConditions(s, o)
-						if st != nil {
+						if archiveidentity.MatchesStation(ctx, st, s) {
 							// The barometric tendency needs history the live API
 							// doesn't return; derive it from the archive when present.
 							fillPressureTrend(ctx, st, &out)
@@ -193,15 +194,11 @@ func registerTools(srv *mcp.Server, live *liveSource, st *store.Store) {
 			if args.StationID < 0 {
 				return nil, ForecastOut{}, fmt.Errorf("station_id must be positive")
 			}
-			s, err := live.resolveStation(ctx)
+			s, err := live.stationByID(ctx, args.StationID)
 			if err != nil {
 				return nil, ForecastOut{}, err
 			}
-			sid := args.StationID
-			if sid == 0 {
-				sid = s.StationID
-			}
-			f, err := live.client.BetterForecast(ctx, sid)
+			f, err := live.client.BetterForecast(ctx, s.StationID)
 			if err != nil {
 				return nil, ForecastOut{}, err
 			}
@@ -217,27 +214,9 @@ func registerTools(srv *mcp.Server, live *liveSource, st *store.Store) {
 			if args.StationID < 0 {
 				return nil, StationDetailsOut{}, fmt.Errorf("station_id must be positive")
 			}
-			sid := args.StationID
-			if sid == 0 {
-				s, err := live.resolveStation(ctx)
-				if err != nil {
-					return nil, StationDetailsOut{}, err
-				}
-				sid = s.StationID
-			}
-			stations, err := live.client.Stations(ctx)
+			found, err := live.stationByID(ctx, args.StationID)
 			if err != nil {
 				return nil, StationDetailsOut{}, err
-			}
-			var found *api.Station
-			for i := range stations {
-				if stations[i].StationID == sid {
-					found = &stations[i]
-					break
-				}
-			}
-			if found == nil {
-				return nil, StationDetailsOut{}, fmt.Errorf("requested station not found for this token")
 			}
 			out := StationDetailsOut{
 				StationID: found.StationID, Name: found.Name,
@@ -256,7 +235,7 @@ func registerTools(srv *mcp.Server, live *liveSource, st *store.Store) {
 		mcp.AddTool(srv, &mcp.Tool{
 			Name:        "station_info",
 			Title:       "Station & archive info",
-			Description: "Return archive coverage. Include station metadata when live access is configured.",
+			Description: "Return archive coverage. Include live station metadata only when the archive's device belongs to that station.",
 			Annotations: conditionsAnnotations(live),
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, _ NoArgs) (*mcp.CallToolResult, StationInfoOut, error) {
 			cov, err := st.Coverage(ctx)
@@ -270,9 +249,9 @@ func registerTools(srv *mcp.Server, live *liveSource, st *store.Store) {
 			if cov.MaxEpoch.Valid {
 				out.LastObs = localTimeStr(cov.MaxEpoch.Int64)
 			}
-			// Enrich with station identity when a token is configured; best-effort.
+			// Verify the archive belongs to this live station before combining them.
 			if live != nil {
-				if s, err := live.resolveStation(ctx); err == nil {
+				if s, err := live.resolveStation(ctx); err == nil && archiveidentity.MatchesStation(ctx, st, s) {
 					out.Name = s.Name
 					out.StationID = s.StationID
 					out.Latitude = new(s.Latitude)
@@ -380,17 +359,20 @@ func fillRainToday(ctx context.Context, st *store.Store, c *ConditionsOut) {
 	c.RainTodayIn = &rain
 }
 
-// fillPressureTrend adds the 3-hour barometric tendency from the archive, so
-// current_conditions carries the short-term storm signal even when the current
-// reading came from the live API. It stays silent when the archive lacks the
-// history for a real trend.
+// fillPressureTrend adds the archive's barometric rate normalized to 3 hours.
+// Its latest pressure sample must be recent relative to the displayed reading,
+// which may come from either the live API or the archive.
 func fillPressureTrend(ctx context.Context, st *store.Store, c *ConditionsOut) {
 	t, ok, err := st.PressureTendency(ctx, 3*3600)
 	if err != nil || !ok {
 		return
 	}
+	observed, err := time.Parse(time.RFC3339, c.Time)
+	if err != nil || observed.Unix() < t.At || observed.Unix()-t.At >= gapThresholdSeconds {
+		return // an old or future archive trend does not describe this reading
+	}
 	c.PressureTrend = t.Category
-	change := t.ChangeInHg
+	change := model.MbToInHg(t.ChangeMbPer3h)
 	c.PressureTrend3hInHg = &change
 }
 
@@ -506,25 +488,10 @@ func resolveRange(a DailySummaryArgs) (int64, int64, error) {
 		return 0, 0, fmt.Errorf("days must be in 0..366")
 	}
 	now := time.Now()
-	// Explicit start wins: honor start..end (end defaults to today), whole end day.
+	// Explicit start wins. An omitted end means now; an explicit end includes
+	// that whole calendar day, just like the other archive analysis tools.
 	if a.Start != "" {
-		start, err := parseLocalDate(a.Start)
-		if err != nil {
-			return 0, 0, fmt.Errorf("invalid start: %w", err)
-		}
-		endDay := now
-		if a.End != "" {
-			endDay, err = parseLocalDate(a.End)
-			if err != nil {
-				return 0, 0, fmt.Errorf("invalid end: %w", err)
-			}
-		}
-		// Include the whole end day.
-		end := endDay.AddDate(0, 0, 1).Add(-time.Second)
-		if start.Unix() > end.Unix() {
-			return 0, 0, fmt.Errorf("start date must not be after end date")
-		}
-		return start.Unix(), end.Unix(), nil
+		return resolveOptionalRange(a.Start, a.End, 0)
 	}
 
 	// No start: a window of `days` whole calendar days. It ends on `end` when

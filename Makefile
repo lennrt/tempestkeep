@@ -2,6 +2,7 @@
 # Go downloads tool modules through the checksum database.
 
 GO ?= go
+NPM ?= npm
 VHS ?= vhs
 BIN_DIR ?= bin
 
@@ -21,6 +22,10 @@ LDFLAGS := -ldflags "-X github.com/lennrt/tempestkeep/internal/version.version=$
 .PHONY: all check-go download tidy tidy-check update-deps build build-pure build-arm64 vet fmt fmtcheck docs-check lint workflows vuln test integration e2e live-smoke race fuzz bench cover api-check api-update generated licenses sbom secrets verify tempestkeep demoapi agentdemo demo demo-setup demo-agent mcp-demo demo-smoke demo-explore vhs release-check hooks clean
 
 all: build
+
+.PHONY: spec-check
+spec-check:
+	OPENSPEC_TELEMETRY=0 $(NPM) run spec:check
 
 check-go:
 	@test "$$($(GO) env GOVERSION)" = "go$(GO_VERSION)" || { echo "Go $(GO_VERSION) is required."; exit 1; }
@@ -79,6 +84,7 @@ race:
 	CGO_ENABLED=1 $(GO) test -race ./... -count=1 -timeout=10m
 
 fuzz:
+	CGO_ENABLED=0 $(GO) test ./pkg/tempest/api -run '^$$' -fuzz '^FuzzEndpointResponses$$' -fuzztime=5s -parallel=1
 	CGO_ENABLED=0 $(GO) test ./pkg/tempest/config -run '^$$' -fuzz '^FuzzDotenvValueRoundTrip$$' -fuzztime=5s -parallel=1
 	CGO_ENABLED=0 $(GO) test ./pkg/tempest/model -run '^$$' -fuzz '^FuzzDeviceObsFromRow$$' -fuzztime=5s -parallel=1
 	CGO_ENABLED=0 $(GO) test ./cmd/tempestkeep -run '^$$' -fuzz '^FuzzScrollRange$$' -fuzztime=5s -parallel=1

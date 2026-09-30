@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
 	"time"
@@ -86,18 +85,18 @@ func fmtNum(v float64, us bool) string {
 }
 
 func cmdExport(args []string) (err error) {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	describe(fs, "tempestkeep export: stream a date range of observations to stdout as CSV or\nJSON Lines, in SI or US units.",
 		"tempestkeep export > archive.csv",
 		"tempestkeep export --start 2024-06-01 --end 2024-06-30 --units us > june.csv",
-		"tempestkeep export --format jsonl | jq .temp_c")
+		"tempestkeep export --format jsonl | jq .air_temp_c")
 	db := fs.String("db", "", "path to the tempest.sqlite archive (or env TEMPEST_DB)")
 	format := fs.String("format", "csv", "output format: csv or jsonl")
 	units := fs.String("units", "si", "unit system: si (stored values) or us (display units)")
 	start := fs.String("start", "", "start date YYYY-MM-DD in local time (default: whole archive)")
-	end := fs.String("end", "", "end date YYYY-MM-DD in local time, inclusive (default: today)")
+	end := fs.String("end", "", "end date YYYY-MM-DD in local time, inclusive (default: now)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}

@@ -1,9 +1,9 @@
 -- Integer-bucketed pre-aggregation for the hourly climatology (the diurnal
 -- profile): one scan groups observations into fixed 15-minute epoch buckets, and
 -- Go folds each whole bucket into its local hour-of-day. Like day_rollup.sql,
--- this leans on every real-world UTC offset (and DST shift) being a multiple of
--- 15 minutes, so a bucket never straddles a local hour boundary; the slow
--- per-row date functions stay out of the scan.
+-- this assumes contemporary IANA offsets aligned to 15 minutes. Unaligned
+-- custom or historical offsets can cross local boundaries; the slow per-row
+-- date functions stay out of the scan.
 -- Params: rollupBucketSeconds, startEpoch, endEpoch.
 SELECT epoch/? AS b,
        MIN(air_temp_c), MAX(air_temp_c),

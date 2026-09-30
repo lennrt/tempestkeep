@@ -193,3 +193,21 @@ func (l *liveSource) resolveDevice(ctx context.Context) (int, error) {
 	defer l.mu.Unlock()
 	return l.deviceID, nil
 }
+
+// stationByID resolves the default Tempest station only when no ID was given.
+// An explicit station uses its own metadata, even if it is not the default.
+func (l *liveSource) stationByID(ctx context.Context, stationID int) (*api.Station, error) {
+	if stationID == 0 {
+		return l.resolveStation(ctx)
+	}
+	stations, err := l.client.Stations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range stations {
+		if stations[i].StationID == stationID {
+			return &stations[i], nil
+		}
+	}
+	return nil, fmt.Errorf("requested station not found for this token")
+}

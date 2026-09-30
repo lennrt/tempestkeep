@@ -9,6 +9,10 @@ building, setup, collection, MCP operation, privacy, and verification.
   displays, exports, and configuration precedence.
 - [`tempestkeep mcp` guide](mcp.md): MCP inputs,
   capabilities, limits, and startup behavior.
+- [Query guide](querying.md): working tool and SQL examples, units, timezones,
+  aggregation, and missing observations.
+- [Troubleshooting](troubleshooting.md): connection, configuration, collection,
+  backup, and report problems.
 - [Plugin guide](../plugin/README.md): optional client integration.
 - [Support guide](../SUPPORT.md): where to ask for help and what to include.
 
@@ -25,6 +29,8 @@ building, setup, collection, MCP operation, privacy, and verification.
   retry classification, configuration, shutdown, and MCP input decisions.
 - [OpenSSF baseline ADR](adr/0003-openssf-security-baseline.md): transport
   defaults, CI repairs, and evidence requirements.
+- [Reliability and specification ADR](adr/0005-reliability-and-specifications.md):
+  checkpoint, API, query, backfill, and specification workflow decisions.
 
 ## Review correctness and security
 
@@ -44,6 +50,7 @@ building, setup, collection, MCP operation, privacy, and verification.
 ## Maintain and release
 
 - [Contribution guide](../CONTRIBUTING.md): required checks and design rules.
+- [OpenSpec workflow](openspec.md): proposals, specifications, and change review.
 - [Release process](../RELEASING.md): qualification, approval, evidence, and
   rollback requirements.
 - [Homebrew tap runbook](homebrew.md): formula contract, validation, and

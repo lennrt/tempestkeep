@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/lennrt/tempestkeep/pkg/tempest/model"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // QueryResult is the outcome of a read-only SQL query: column names plus rows
@@ -25,7 +28,8 @@ type QueryResult struct {
 // to maxRows rows (≤0 means 1000). Two layers keep it safe: this validation
 // accepts only a single SELECT/WITH statement, and the connection itself runs
 // under PRAGMA query_only, so even a statement that slipped through could not
-// mutate the archive.
+// mutate the archive. SQLite also bounds each value or encoded row before Go
+// receives it; row, column, total-byte, and time limits bound the result.
 func (s *Store) Query(ctx context.Context, query string, maxRows int) (_ QueryResult, err error) {
 	var res QueryResult
 	if len(query) == 0 || len(query) > MaxQueryBytes || strings.IndexByte(query, 0) >= 0 {
@@ -46,9 +50,31 @@ func (s *Store) Query(ctx context.Context, query string, maxRows int) (_ QueryRe
 	}
 	queryCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	rows, err := db.QueryContext(queryCtx, query)
+	conn, err := db.Conn(queryCtx)
 	if err != nil {
-		return res, archiveFailure("execute query", err)
+		return res, archiveFailure("open query connection", err)
+	}
+	defer func() { err = errors.Join(err, archiveFailure("close query connection", conn.Close())) }()
+	// Limits belong to this physical connection. Keep it checked out until
+	// the result closes and restore its previous settings before reuse.
+	limits := []struct{ id, value, previous int }{
+		{id: sqlite3.SQLITE_LIMIT_LENGTH, value: MaxQueryResultBytes},
+		{id: sqlite3.SQLITE_LIMIT_COLUMN, value: MaxQueryColumns},
+	}
+	for index := range limits {
+		limit := &limits[index]
+		limit.previous, err = sqlite.Limit(conn, limit.id, limit.value)
+		if err != nil {
+			return res, archiveFailure("bound query connection", err)
+		}
+		defer func() {
+			_, restoreErr := sqlite.Limit(conn, limit.id, limit.previous)
+			err = errors.Join(err, archiveFailure("restore query connection", restoreErr))
+		}()
+	}
+	rows, err := conn.QueryContext(queryCtx, query)
+	if err != nil {
+		return res, queryFailure("execute query", err)
 	}
 	defer func() { err = errors.Join(err, archiveFailure("close query rows", rows.Close())) }()
 
@@ -74,7 +100,7 @@ func (s *Store) Query(ctx context.Context, query string, maxRows int) (_ QueryRe
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
-			return res, archiveFailure("read query row", err)
+			return res, queryFailure("read query row", err)
 		}
 		for i, v := range vals {
 			switch value := v.(type) {
@@ -84,7 +110,12 @@ func (s *Store) Query(ctx context.Context, query string, maxRows int) (_ QueryRe
 				vals[i] = string(value)
 			case string:
 				resultBytes += len(value)
-			case int64, float64, bool:
+			case float64:
+				if math.IsNaN(value) || math.IsInf(value, 0) {
+					return res, fmt.Errorf("%w: query result contains a non-finite number", ErrInvalidArgument)
+				}
+				resultBytes += 8
+			case int64, bool:
 				resultBytes += 8
 			default:
 				return res, fmt.Errorf("%w: unsupported result value in column %d", ErrInvalidArchive, i)
@@ -96,7 +127,19 @@ func (s *Store) Query(ctx context.Context, query string, maxRows int) (_ QueryRe
 		res.Rows = append(res.Rows, vals)
 	}
 	res.RowCount = len(res.Rows)
-	return res, archiveFailure("read query rows", rows.Err())
+	return res, queryFailure("read query rows", rows.Err())
+}
+
+func queryFailure(action string, err error) error {
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) && (sqliteErr.Code() == sqlite3.SQLITE_TOOBIG ||
+		sqliteErr.Code() == sqlite3.SQLITE_ERROR && sqliteErr.Error() == "SQL logic error: too many columns in result set (1)") {
+		// SQLite reports the column limit as its generic error code. Match
+		// the complete diagnostic so an identifier with similar text cannot
+		// turn an unrelated query error into a size-limit classification.
+		return fmt.Errorf("%w: query exceeds SQLite value, row, or column limits", ErrResultTooLarge)
+	}
+	return archiveFailure(action, err)
 }
 
 // validateReadOnlyQuery accepts exactly one SELECT or WITH statement. Leading

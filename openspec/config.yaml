@@ -1,0 +1,31 @@
+schema: spec-driven
+
+context: |
+  TempestKeep is a Go 1.27 command and MCP stdio server for WeatherFlow Tempest.
+  Read CONTRIBUTING.md and the relevant docs/adr records before implementation.
+  Store observations in SI units, with exactly one device per SQLite archive.
+  Keep Store reads separate from Writer mutations. Preserve append-only replay.
+  Use the official MCP Go SDK and the pure-Go modernc.org/sqlite driver.
+  Keep stdout for command data or MCP JSON-RPC; diagnostics belong on stderr.
+  Bound input, work, retries, and output. Never echo credentials or raw API errors.
+  Calendar summaries use the process timezone; ranges use explicit boundary rules.
+  Preserve errors.Is/errors.As classification and cancellation of blocking work.
+  Add an ADR for public API, wire, storage, security, configuration, or release changes.
+  Use synthetic data and local HTTP servers in tests. Never require a live token.
+  Write short, direct English. Preserve identifiers, units, and technical meaning.
+  OpenSpec is development tooling; building the Go binary does not require Node.js.
+
+rules:
+  proposal:
+    - State the user-visible failure and the compatibility impact.
+    - Name the affected capability specifications and required ADRs.
+  specs:
+    - Give every requirement a concrete WHEN/THEN scenario.
+    - Include failure, boundary, retry, and cancellation cases where applicable.
+    - Separate observed weather from forecasts and missing values from zero.
+  design:
+    - Explain ownership of files, connections, transactions, and retained inputs.
+    - State how existing archives and clients behave after the change.
+  tasks:
+    - Include a reproducible check in each implementation task.
+    - Record unavailable checks as limitations, never as passing checks.

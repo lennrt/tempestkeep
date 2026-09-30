@@ -36,6 +36,7 @@ type richWant struct {
 	maxSustainMph float64
 	totalStrikes  int64
 	peakSolarWm2  float64
+	solarEnergyMJ float64
 	peakUV        float64
 	minTempF      float64
 	maxTempF      float64
@@ -64,14 +65,14 @@ func makeRichArchive(t *testing.T) (string, richWant) {
 		epoch INTEGER NOT NULL, wind_lull REAL, wind_avg REAL, wind_gust REAL,
 		wind_dir REAL, pressure_mb REAL, air_temp_c REAL, humidity REAL,
 		illuminance_lux REAL, uv REAL, solar_wm2 REAL, rain_mm REAL,
-		strike_dist_km REAL, strike_count REAL, battery_v REAL)`); err != nil {
+		strike_dist_km REAL, strike_count REAL, battery_v REAL, report_interval_min REAL)`); err != nil {
 		t.Fatalf("create table: %v", err)
 	}
 
 	stmt, err := db.PrepareContext(ctx, `INSERT INTO obs_st
 		(epoch, wind_lull, wind_avg, wind_gust, wind_dir, pressure_mb, air_temp_c,
 		 humidity, illuminance_lux, uv, solar_wm2, rain_mm, strike_dist_km,
-		 strike_count, battery_v) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		 strike_count, battery_v, report_interval_min) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		t.Fatalf("prepare insert: %v", err)
 	}
@@ -86,7 +87,7 @@ func makeRichArchive(t *testing.T) (string, richWant) {
 		n    = 72                // three days of hourly observations
 	)
 	days := map[string]bool{}
-	var maxGust, maxSust, maxSolar, maxUV float64
+	var maxGust, maxSust, maxSolar, maxUV, solarEnergy float64
 	minC, maxC := 1e9, -1e9
 	var strikes int64
 	for i := range n {
@@ -109,7 +110,7 @@ func makeRichArchive(t *testing.T) (string, richWant) {
 			sdist = 6.0
 		}
 		if _, err := stmt.ExecContext(ctx, e, windAvg-0.5, windAvg, gust, dir, press, tempC,
-			55.0, lux, uv, solar, rain, sdist, strike, 2.6); err != nil {
+			55.0, lux, uv, solar, rain, sdist, strike, 2.6, 60); err != nil {
 			t.Fatalf("insert row %d: %v", i, err)
 		}
 
@@ -119,6 +120,7 @@ func makeRichArchive(t *testing.T) (string, richWant) {
 		maxSust = maxF(maxSust, windAvg)
 		maxSolar = maxF(maxSolar, solar)
 		maxUV = maxF(maxUV, uv)
+		solarEnergy += solar * 3600 / 1_000_000
 		minC, maxC = minF(minC, tempC), maxF(maxC, tempC)
 		strikes += int64(strike)
 	}
@@ -132,6 +134,7 @@ func makeRichArchive(t *testing.T) (string, richWant) {
 		maxSustainMph: model.MpsToMph(maxSust),
 		totalStrikes:  strikes,
 		peakSolarWm2:  maxSolar,
+		solarEnergyMJ: solarEnergy,
 		peakUV:        maxUV,
 		minTempF:      model.CToF(minC),
 		maxTempF:      model.CToF(maxC),
@@ -246,6 +249,9 @@ func TestIntegrationRichArchiveTools(t *testing.T) {
 		}
 		if out.PeakUV == nil || !almost(*out.PeakUV, w.peakUV) {
 			t.Errorf("peak_uv = %v, want %v", out.PeakUV, w.peakUV)
+		}
+		if !almost(out.TotalInsolationMJ, w.solarEnergyMJ) {
+			t.Errorf("total_insolation_mj = %v, want %v", out.TotalInsolationMJ, w.solarEnergyMJ)
 		}
 	})
 

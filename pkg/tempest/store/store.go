@@ -477,7 +477,7 @@ func (s *Store) PressureTendency(ctx context.Context, windowSeconds int64) (*Pre
 	}
 	var nowEpoch int64
 	var nowMb float64
-	err = db.QueryRowContext(ctx, qryPressureAt, maxEpoch).Scan(&nowEpoch, &nowMb)
+	err = db.QueryRowContext(ctx, qryPressureAt, model.MaxEpochSeconds).Scan(&nowEpoch, &nowMb)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil // no pressure in the archive
 	}
@@ -536,20 +536,21 @@ type dayAgg struct {
 	tempSum float64
 	tempN   int64
 	rainMm  float64
+	rainN   int64
 	gustMax *float64
 	obs     int64
 }
 
 // rollupBucketSeconds is the pre-aggregation bucket for calendar queries: 15
-// minutes. Every real-world UTC offset (and DST shift) is a multiple of 15
-// minutes, so a bucket never straddles a local calendar-day boundary, which
-// makes it safe to aggregate buckets with pure integer SQL and assign each
-// whole bucket to a local day in Go (see day_rollup.sql).
+// minutes. Contemporary IANA UTC offsets and DST shifts align to 15 minutes,
+// so these buckets stay within local days for Tempest-era observations. Custom
+// locations or older historical offsets that do not align can straddle a local
+// boundary. Integer SQL keeps per-row timezone conversion out of archive scans.
 const rollupBucketSeconds = 900
 
 // dayAggregates rolls the observations in [startEpoch, endEpoch] up to local
 // calendar days, oldest first: one integer-bucketed scan in SQL, then a cheap
-// bucket→day merge in Go (see rollupBucketSeconds for why this is exact).
+// bucket→day merge in Go (see the timezone assumption at rollupBucketSeconds).
 func (s *Store) dayAggregates(ctx context.Context, startEpoch, endEpoch int64) (_ []dayAgg, err error) {
 	if err := validateEpochRange(startEpoch, endEpoch); err != nil {
 		return nil, err
@@ -566,10 +567,10 @@ func (s *Store) dayAggregates(ctx context.Context, startEpoch, endEpoch int64) (
 
 	var out []dayAgg
 	for rows.Next() {
-		var b, tempN, obs int64
+		var b, tempN, obs, rainN int64
 		var tmin, tmax, gust sql.NullFloat64
 		var tempSum, rainMm float64
-		if err := rows.Scan(&b, &tmin, &tmax, &tempSum, &tempN, &rainMm, &gust, &obs); err != nil {
+		if err := rows.Scan(&b, &tmin, &tmax, &tempSum, &tempN, &rainMm, &gust, &obs, &rainN); err != nil {
 			return nil, archiveFailure("scan daily aggregate", err)
 		}
 		t := time.Unix(b*rollupBucketSeconds, 0).Local()
@@ -583,6 +584,7 @@ func (s *Store) dayAggregates(ctx context.Context, startEpoch, endEpoch int64) (
 		cur.tempSum += tempSum
 		cur.tempN += tempN
 		cur.rainMm += rainMm
+		cur.rainN += rainN
 		cur.gustMax = maxPtr(cur.gustMax, nf(gust))
 		cur.obs += obs
 	}
@@ -664,7 +666,7 @@ type hourAcc struct {
 // humidity, and wind at each hour plus the min/max temperature and peak gust
 // ever seen in that hour. It answers "when is it typically coldest / windiest?"
 // Hours the archive never observed are omitted. Like the calendar rollups it
-// buckets to 15 minutes in SQL (which never straddles a local hour boundary) and
+// buckets to 15 minutes in SQL (using the timezone assumption above) and
 // assigns each bucket to its hour in Go.
 func (s *Store) HourlyClimatology(ctx context.Context, startEpoch, endEpoch int64) (_ []HourStat, err error) {
 	if err := validateEpochRange(startEpoch, endEpoch); err != nil {
@@ -886,10 +888,6 @@ func (s *Store) Records(ctx context.Context) (Records, error) {
 	}
 	return r, nil
 }
-
-// maxEpoch is an epoch upper bound safely beyond any real observation
-// (year ~4147) while leaving integer headroom for bucket arithmetic.
-const maxEpoch = int64(1) << 36
 
 // localTime renders an epoch as a local RFC3339 timestamp for human-facing gap
 // reports.

@@ -15,6 +15,9 @@
 /coverage.out
 /scorecard-results.sarif
 
+# Development-only OpenSpec dependencies
+/node_modules/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -46,7 +46,7 @@ The formula must:
 - run a deterministic archive operation without a token or network access.
 
 The formula must not run `make build`. A source archive has no `.git` directory,
-so the Makefile version fallback would otherwise report `dev`.
+so the Makefile otherwise injects a development fallback instead of the release version.
 
 ## Local verification
 

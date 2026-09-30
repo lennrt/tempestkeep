@@ -14,6 +14,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  specifications:
+    name: OpenSpec requirements
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OPENSPEC_TELEMETRY: "0"
+      DO_NOT_TRACK: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.19.0"
+          cache: npm
+
+      - name: Install locked development tools
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Validate specifications and active changes
+        run: npm run spec:check
+
+  platforms:
+    name: Native tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.0"
+          check-latest: false
+          cache: true
+
+      - name: Test native archive and command behavior
+        run: go test ./... -count=1 -timeout=5m
+
+      - name: Check documentation on this filesystem
+        run: go run ./tools/docscheck -root .
+
+      - name: Build pure-Go packages
+        run: go build ./...
+
   verify:
     name: Go 1.27.0 verification
     runs-on: ubuntu-latest

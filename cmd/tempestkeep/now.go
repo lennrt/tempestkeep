@@ -16,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/harmonica"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/lennrt/tempestkeep/internal/archiveidentity"
 	"github.com/lennrt/tempestkeep/pkg/tempest/api"
 	"github.com/lennrt/tempestkeep/pkg/tempest/config"
 	"github.com/lennrt/tempestkeep/pkg/tempest/model"
@@ -59,13 +60,14 @@ func (l *nowLiveSource) resolve(ctx context.Context) (*api.Station, error) {
 	return station, nil
 }
 
-func (l *nowLiveSource) stationName() string {
+func (l *nowLiveSource) archiveStationName(ctx context.Context, archive *store.Store) string {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.station == nil {
+	station := l.station
+	l.mu.Unlock()
+	if !archiveidentity.MatchesStation(ctx, archive, station) {
 		return ""
 	}
-	return l.station.Name
+	return station.Name
 }
 
 // load fetches one frame of data. Live is preferred; if the live fetch fails and
@@ -125,7 +127,7 @@ func (c nowConfig) load(ctx context.Context) (dashboard, error) {
 		}
 		stationName := ""
 		if c.live != nil {
-			stationName = c.live.stationName()
+			stationName = c.live.archiveStationName(ctx, c.store)
 		}
 		d := buildArchiveDashboard(stationName, o)
 		if err := fillArchiveRainToday(ctx, c.store, &d, time.Now()); err != nil {
@@ -362,6 +364,9 @@ func cmdNow(args []string) (err error) {
 	}
 	if *intervalSec < 5 {
 		return usagef("--interval must be at least 5 seconds")
+	}
+	if int64(*intervalSec) > int64((1<<63-1)/time.Second) {
+		return usagef("--interval is too large")
 	}
 	if err := config.LoadDotenv(ctx, ".env"); err != nil {
 		return err

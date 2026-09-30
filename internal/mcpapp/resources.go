@@ -18,11 +18,12 @@ const (
 )
 
 // dataDictionary documents every obs_st column: meaning, unit, and the quirks
-// an agent needs to aggregate correctly (per-interval rain, multi-device rows).
+// an agent needs to aggregate correctly (per-interval rain and missing readings).
 const dataDictionary = `# TempestKeep archive: data dictionary
 
 The archive is a SQLite file. Table **obs_st** holds one row per observation
-(1-minute resolution over REST) in the SI units the Tempest reports. The query
+in the SI units the Tempest reports. Reporting intervals can vary; use
+report_interval_min when estimating observed time. The query
 tools return US display units; **query_sql returns these raw SI values**.
 
 | Column | Meaning | Unit / values |
@@ -52,15 +53,18 @@ Primary key: (device_id, epoch); writes are INSERT OR IGNORE, so the archive
 is append-only and idempotent. NULL means the sensor had no reading.
 
 Table **meta** (key, value) holds collector state, e.g. backfill_cursor and
-backfill_complete for the resumable backward backfill.
+backfill_complete for the resumable backward backfill. MCP also records the
+consecutive empty-history duration at its saved cursor so small batches can
+finish across calls and restarts.
 
 Notes for correct queries:
-- Rows from every device share the table; a typical archive has one Tempest.
-  Filter by device_id if you have more than one device.
+- Each archive belongs to one device. Use a separate archive for another device.
 - rain_mm and strike_count are per-interval deltas: totals need SUM, not MAX.
-- Daily/monthly grouping should use local time: the built-in tools
-  (daily_summary, period_summary, this_day_in_history) already do this; prefer
-  them over hand-written strftime queries.
+- NULL means missing data, not zero. Counts and coverage matter when comparing
+  periods; a day with one observation is not a complete day.
+- The built-in calendar tools (daily_summary, period_summary,
+  this_day_in_history) group in the process timezone. Prefer these tools over
+  hand-written strftime queries; SQLite localtime support depends on its runtime.
 `
 
 // registerResources adds the archive resources and the prompts. st serves the
@@ -119,7 +123,11 @@ func registerPrompts(srv *mcp.Server) {
 		focus := req.Params.Arguments["focus"]
 		text := `Write a weather report for my station using its own data, not generic knowledge:
 
-1. current_conditions for what it's like right now.
+Use the tools this server lists. If a source is unavailable, say which part of
+the report is missing. Describe archived readings as of their returned time;
+do not present a stale archive as live weather.
+
+1. current_conditions for the latest available reading and its age.
 2. pressure_trend for the short-term signal: is the barometer rising or falling?
 3. forecast for what's coming (next hours + days).
 4. daily_summary for the recent trend (last 7 days).
@@ -149,12 +157,13 @@ Keep it conversational and concrete; cite the numbers you used.`
 	}, func(_ context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 		text := `Review my station's local climate from its own archive, not generic knowledge:
 
-1. climate_normals for the shape of the year: the twelve-month baseline.
-2. temperature_trend for the direction of travel: is it warming or cooling, and how strong is the fit?
-3. climate_indices for the seasonal character: frost, ice, summer, and hot days, and tropical nights.
-4. comfort_stats for the human extremes: the worst heat index, the coldest wind chill, the muggiest day.
-5. lightning_activity, solar_stats, and wind_stats for the storm, sun, and wind story.
-6. records to anchor the all-time extremes.
+1. archive_status for the date span and gaps; explain limits from short or incomplete coverage.
+2. climate_normals for archive averages by calendar month. These are not an official 30-year climate normal.
+3. temperature_trend for the fitted change and its limits; do not infer a long-term trend from short coverage.
+4. climate_indices for frost, ice, summer, and hot days, and tropical nights.
+5. comfort_stats for heat index, wind chill, and dew point extremes.
+6. lightning_activity, solar_stats, and wind_stats for storm, sun, and wind statistics.
+7. records for extremes across the available archive.
 
 Tie it together into a portrait of this place: what the seasons feel like, what stands out,
 and what the trend suggests. Cite the numbers you used.`
@@ -182,15 +191,22 @@ and what the trend suggests. Cite the numbers you used.`
 				Content: &mcp.TextContent{Text: `Build my local weather archive and keep it current:
 
 1. archive_status to see what's already stored (coverage, freshness, gaps).
+   Check the listed tools before writing. If backfill_archive and sync_archive
+   are absent, explain that this server has read-only archive access and that
+   tempestkeep collect can populate the archive outside this session.
 2. If history is missing, call backfill_archive repeatedly until has_more is
-   false; each call fetches one bounded batch and resumes automatically.
+   false; omit end to resume the saved cursor between calls.
    Report progress as you go (rows added, coverage so far).
-3. sync_archive to top up to the present.
+   Completion uses an empty-history heuristic; older observations can exist
+   beyond a long outage. Use explicit start and exclusive end dates for a known gap.
+3. If observations exist, call sync_archive to fetch newer rows. Repeat while
+   has_more is true. An empty archive needs backfill_archive first.
 4. Finish with archive_status and summarize: total observations, date span,
-   freshness, and any remaining gaps worth backfilling (pass start/end to
-   backfill_archive to target a specific gap).
+   freshness, and remaining gaps. An explicit end does not advance the shared
+   cursor; do not repeat the same explicit range expecting it to move backward.
 
-Every write is idempotent (INSERT OR IGNORE), so repeating a step is always safe.`},
+Committed observations use INSERT OR IGNORE. Replaying a chunk does not add
+duplicate rows; repeated calls can still fetch older or newer windows.`},
 			}},
 		}, nil
 	})

@@ -294,7 +294,7 @@ func (s *Store) TemperatureSpells(ctx context.Context, p TempSpellParams, startE
 // RainStats summarizes rainfall over a date range, in US display units, plus the
 // longest dry and wet spells. A "rainy day" clears the 0.01 in threshold; a
 // spell is a run of consecutive observed calendar days, and a missing day (a
-// coverage gap) breaks the run rather than silently bridging it.
+// coverage gap) or a day without rain readings breaks the run.
 type RainStats struct {
 	TotalIn      float64  `json:"total_in"`
 	DaysObserved int64    `json:"days_observed"`
@@ -313,8 +313,8 @@ type RainStats struct {
 
 // RainStats aggregates rainfall over [startEpoch, endEpoch]: total, rainy days,
 // the wettest day, and the longest dry and wet spells. Spells run over
-// consecutive observed calendar days; a gap in coverage ends the current spell,
-// so a dry spell is never claimed across days the archive never saw.
+// consecutive calendar days with rain readings; a gap or a day without rain
+// readings ends the current spell. DaysObserved counts days with any observation.
 func (s *Store) RainStats(ctx context.Context, startEpoch, endEpoch int64) (RainStats, error) {
 	days, err := s.dayAggregates(ctx, startEpoch, endEpoch)
 	if err != nil {
@@ -342,10 +342,13 @@ func (s *Store) RainStats(ctx context.Context, startEpoch, endEpoch int64) (Rain
 		if !havePrev || !d.day.Equal(prev.AddDate(0, 0, 1)) {
 			dryLen, wetLen = 0, 0 // first day, or a coverage gap: start fresh
 		}
-		if rainy {
+		switch {
+		case d.rainN == 0:
+			dryLen, wetLen = 0, 0
+		case rainy:
 			wetLen++
 			dryLen = 0
-		} else {
+		default:
 			dryLen++
 			wetLen = 0
 		}
