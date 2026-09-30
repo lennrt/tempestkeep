@@ -43,7 +43,7 @@ func TestWriteEnvFileQuotesValuesAndRestrictsPermissions(t *testing.T) {
 func TestCommandArgQuotesSpacesAndQuotes(t *testing.T) {
 	got := commandArg(`/tmp/weather archive/owner's.sqlite`)
 	if runtime.GOOS == "windows" {
-		if got != `"/tmp/weather archive/owner's.sqlite"` {
+		if got != `'/tmp/weather archive/owner''s.sqlite'` {
 			t.Fatalf("commandArg() = %q", got)
 		}
 		return
@@ -59,7 +59,7 @@ func TestMCPRegistrationCommandWrapsSafely(t *testing.T) {
 		if len(lines) != 1 {
 			t.Fatalf("Windows command has %d lines, want 1", len(lines))
 		}
-		if lines[0] != `claude mcp add tempestkeep -- tempestkeep mcp --db "/tmp/weather archive/tempest.sqlite"` {
+		if lines[0] != `claude mcp add tempestkeep -- tempestkeep mcp --db '/tmp/weather archive/tempest.sqlite'` {
 			t.Fatalf("registration command = %#v", lines)
 		}
 		return

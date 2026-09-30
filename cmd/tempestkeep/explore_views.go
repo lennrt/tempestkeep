@@ -52,13 +52,22 @@ func renderDayView(d dayData) string {
 	// hold 46 or 50 half-hour buckets, so size from the actual day instead of
 	// a 48-column constant that would drop the fall-back day's last hour.
 	midnight := midnightOf(time.Unix(d.points[0].Epoch, 0).Local())
-	cols := int(midnight.AddDate(0, 0, 1).Sub(midnight) / (dayBucketSeconds * time.Second))
+	if d.stat != nil {
+		if day, err := time.ParseInLocation(time.DateOnly, d.stat.Day, time.Local); err == nil {
+			midnight = day
+		}
+	}
+	// Series buckets align to UTC, so a quarter-hour timezone may start with
+	// a partial bucket on the preceding local date. Include both edge buckets.
+	firstBucket := midnight.Unix() / dayBucketSeconds * dayBucketSeconds
+	lastBucket := (midnight.AddDate(0, 0, 1).Unix() - 1) / dayBucketSeconds * dayBucketSeconds
+	cols := int((lastBucket-firstBucket)/dayBucketSeconds) + 1
 	temps := make([]*float64, cols)
 	rain := make([]*float64, cols)
 	wind := make([]*float64, cols)
 	solar := make([]*float64, cols)
 	for _, p := range d.points {
-		i := int((p.Epoch - midnight.Unix()) / dayBucketSeconds)
+		i := int((p.Epoch - firstBucket) / dayBucketSeconds)
 		if i < 0 || i >= cols {
 			continue
 		}
@@ -142,9 +151,10 @@ func (d dayData) statLine() string {
 // the right columns on DST days too.
 func hourAxis(midnight time.Time, cols int) string {
 	axis := []rune(strings.Repeat(" ", cols))
+	firstBucket := midnight.Unix() / dayBucketSeconds * dayBucketSeconds
 	for _, h := range []int{0, 6, 12, 18} {
 		mark := time.Date(midnight.Year(), midnight.Month(), midnight.Day(), h, 0, 0, 0, time.Local)
-		i := int(mark.Sub(midnight) / (dayBucketSeconds * time.Second))
+		i := int((mark.Unix() - firstBucket) / dayBucketSeconds)
 		for j, r := range fmt.Sprintf("%02d:00", h) {
 			if k := i + j; k >= 0 && k < cols {
 				axis[k] = r
@@ -166,8 +176,8 @@ func renderWeekView(days []store.DayStat, offset int) string {
 		byDay[d.Day] = d
 		all = append(all, d.TempMinF, d.TempMaxF)
 	}
-	scaleLo, scaleHi, ok := minMaxVals(all)
-	if !ok {
+	scaleLo, scaleHi, _ := minMaxVals(all)
+	if len(days) == 0 {
 		return emptyView("no observations this week")
 	}
 
@@ -177,18 +187,20 @@ func renderWeekView(days []store.DayStat, offset int) string {
 		day := start.AddDate(0, 0, i)
 		label := fmt.Sprintf("%-7s", day.Format("Mon 2"))
 		d, have := byDay[day.Format("2006-01-02")]
-		if !have || (d.TempMinF == nil && d.TempMaxF == nil) {
+		if !have {
 			lines = append(lines, label+faint().Render("· no data"))
 			continue
 		}
-		lo, hi := orFallback(d.TempMinF, d.TempMaxF), orFallback(d.TempMaxF, d.TempMinF)
-		// The high is padded to a fixed width (every value carries exactly one
-		// two-byte °, so byte padding is uniform) or differing digit counts
-		// would shift the rain and gust columns per row.
-		line := label +
-			lipgloss.NewStyle().Foreground(tempColor(lo)).Render(fmt.Sprintf("%4.0f° ", lo)) +
-			rangeBand(lo, hi, scaleLo, scaleHi, bandW, tempColor) +
-			lipgloss.NewStyle().Foreground(tempColor(hi)).Render(fmt.Sprintf(" %-5s", fmt.Sprintf("%.0f°", hi)))
+		line := label
+		if d.TempMinF == nil && d.TempMaxF == nil {
+			line += faint().Render(fmt.Sprintf("%-*s", bandW+12, "temperature unavailable"))
+		} else {
+			lo, hi := orFallback(d.TempMinF, d.TempMaxF), orFallback(d.TempMaxF, d.TempMinF)
+			// Match the temperature band's width even when a day has no temperature.
+			line += lipgloss.NewStyle().Foreground(tempColor(lo)).Render(fmt.Sprintf("%4.0f° ", lo)) +
+				rangeBand(lo, hi, scaleLo, scaleHi, bandW, tempColor) +
+				lipgloss.NewStyle().Foreground(tempColor(hi)).Render(fmt.Sprintf(" %-5s", fmt.Sprintf("%.0f°", hi)))
+		}
 		line += faint().Render(" rain ") + rainCell(d.RainIn, 0)
 		if d.PeakGustMph != nil {
 			line += faint().Render("  gust ") + fmt.Sprintf("%.0f", *d.PeakGustMph)
@@ -342,7 +354,7 @@ func daysIn(start, end time.Time) int {
 	if today := midnightOf(time.Now()).AddDate(0, 0, 1); end.After(today) {
 		end = today
 	}
-	return int(end.Sub(start).Hours() / 24)
+	return max(0, daysBetween(start, end))
 }
 
 // ---- year view -----------------------------------------------------------------

@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -331,14 +332,14 @@ func TestLightningActivity(t *testing.T) {
 
 func TestSolarActivity(t *testing.T) {
 	noon := localNoon(2024, time.August, 1)
-	// Aug 1: two observations in adjacent 15-minute buckets. Bucket means integrate
-	// to 200*900/1e6 + 400*900/1e6 = 0.54 MJ/m². Aug 2: one observation, 0.09 MJ.
-	rows := []obsRow{
-		{epoch: noon, solar: new(float64(200)), uv: new(float64(3)), lux: new(float64(1000))},
-		{epoch: noon + 900, solar: new(float64(400)), uv: new(float64(7)), lux: new(float64(50000))},
-		{epoch: localNoon(2024, time.August, 2), solar: new(float64(100)), uv: new(float64(1)), lux: new(float64(500))},
+	// Aug 1: two reported 15-minute intervals estimate 200*900/1e6 +
+	// 400*900/1e6 = 0.54 MJ/m². Aug 2: one 15-minute interval, 0.09 MJ.
+	rows := []model.DeviceObs{
+		{Epoch: noon, SolarWm2: new(200.0), UV: new(3.0), IlluminanceLux: new(1000.0), ReportIntervalMin: new(15.0)},
+		{Epoch: noon + 900, SolarWm2: new(400.0), UV: new(7.0), IlluminanceLux: new(50000.0), ReportIntervalMin: new(15.0)},
+		{Epoch: localNoon(2024, time.August, 2), SolarWm2: new(100.0), UV: new(1.0), IlluminanceLux: new(500.0), ReportIntervalMin: new(15.0)},
 	}
-	s := openStoreWith(t, rows)
+	s := openStoreWithDeviceObs(t, rows)
 
 	ss, err := s.SolarActivity(context.Background(), 0, time.Now().Unix())
 	if err != nil {
@@ -905,6 +906,49 @@ func TestSeries(t *testing.T) {
 	}
 	if !almost(rain, model.MmToInch(6)) {
 		t.Errorf("total rain = %v, want %v", rain, model.MmToInch(6))
+	}
+}
+
+func TestSeriesCountsEpochAlignedBuckets(t *testing.T) {
+	s := openStoreWith(t, nil)
+	const bucket = int64(60)
+	// This interval is shorter than MaxSeriesPoints minutes, but its partial
+	// first and last minutes span MaxSeriesPoints+1 epoch-aligned buckets.
+	if _, err := s.Series(t.Context(), 59, store.MaxSeriesPoints*bucket, bucket); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("unaligned interval = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := s.Series(t.Context(), 60, (store.MaxSeriesPoints+1)*bucket-1, bucket); err != nil {
+		t.Fatalf("exactly MaxSeriesPoints buckets: %v", err)
+	}
+}
+
+func TestPressureTendencyUsesFullSupportedEpochRange(t *testing.T) {
+	s := openStoreWith(t, []obsRow{
+		{epoch: model.MaxEpochSeconds - 3*3600, pres: new(float64(1000))},
+		{epoch: model.MaxEpochSeconds, pres: new(float64(1003))},
+	})
+	trend, ok, err := s.PressureTendency(t.Context(), 3*3600)
+	if err != nil || !ok {
+		t.Fatalf("latest supported pressure range: %v, %v, %v", trend, ok, err)
+	}
+	if trend.At != model.MaxEpochSeconds || trend.ChangeMbPer3h != 3 {
+		t.Fatalf("pressure trend = %+v, want last supported epoch and +3 mb", trend)
+	}
+}
+
+func TestQueryRejectsNonFiniteResults(t *testing.T) {
+	s := openStoreWith(t, nil)
+	for _, query := range []string{"SELECT 1e999", "SELECT -1e999", "SELECT 1e308 * 1e308"} {
+		if _, err := s.Query(t.Context(), query, 1); !errors.Is(err, store.ErrInvalidArgument) {
+			t.Fatalf("non-finite result from %q = %v, want ErrInvalidArgument", query, err)
+		}
+	}
+	result, err := s.Query(t.Context(), "SELECT 1e308, 1/0, 'ok'", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := json.Marshal(result); err != nil {
+		t.Fatalf("finite and null results must remain JSON-friendly: %v", err)
 	}
 }
 

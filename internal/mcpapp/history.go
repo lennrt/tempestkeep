@@ -420,11 +420,11 @@ func registerCalendarTools(srv *mcp.Server, st *store.Store) {
 		coarsened := false
 		if bucket <= 0 {
 			bucket = autoBucket(start, end, maxPoints)
-		} else if minBucket := autoBucket(start, end, 2000); bucket < minBucket {
+		} else if end/bucket-start/bucket+1 > store.MaxSeriesPoints {
 			// An explicit bucket must still respect the hard point cap, or a
 			// small bucket over a multi-year range materializes millions of
 			// points into one tool result.
-			bucket = minBucket
+			bucket = fitSeriesBucket(start, end, store.MaxSeriesPoints, bucket)
 			coarsened = true
 		}
 		points, err := st.Series(ctx, start, end, bucket)
@@ -638,7 +638,7 @@ func registerSensorTools(srv *mcp.Server, st *store.Store) {
 		if ls.DaysObserved == 0 {
 			out.Note = "no observations in this range"
 		} else if ls.TotalStrikes == 0 {
-			out.Note = "no lightning detected in this range"
+			out.Note = "no nonzero strike counts are stored in this range; missing strike-count readings do not establish storm-free days"
 		}
 		return nil, out, nil
 	})
@@ -646,7 +646,7 @@ func registerSensorTools(srv *mcp.Server, st *store.Store) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "solar_stats",
 		Title:       "Solar and UV statistics",
-		Description: "Return solar, UV, illuminance, and insolation statistics. Insolation covers observed time only. The default range is the full archive.",
+		Description: "Return solar, UV, illuminance, and insolation statistics. Insolation estimates use each solar reading's reported duration. The default range is the full archive.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args SolarArgs) (*mcp.CallToolResult, SolarOut, error) {
 		start, end, err := resolveOptionalRange(args.Start, args.End, 0)
@@ -696,7 +696,7 @@ func registerSensorTools(srv *mcp.Server, st *store.Store) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "comfort_stats",
 		Title:       "Human-comfort extremes",
-		Description: "Return heat-index, wind-chill, and dew-point extremes in °F. Calculations use matching 15-minute sensor means. The default range is the full archive.",
+		Description: "Return heat-index, wind-chill, and dew-point extremes in °F. Calculations use matching 15-minute sensor means; missing required readings omit the affected value. The default range is the full archive.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args ComfortArgs) (*mcp.CallToolResult, ComfortOut, error) {
 		start, end, err := resolveOptionalRange(args.Start, args.End, 0)
@@ -917,11 +917,11 @@ func resolveOptionalRange(startDate, endDate string, defStart int64) (int64, int
 	return start, end, nil
 }
 
-// autoBucket picks the smallest bucket width (≥1 minute) that keeps a series
-// under maxPoints.
+// autoBucket picks the smallest whole-minute bucket that keeps the inclusive,
+// epoch-aligned series at or below maxPoints. Partial buckets count too.
 func autoBucket(start, end int64, maxPoints int) int64 {
 	span := end - start
-	if span <= 0 || maxPoints <= 0 {
+	if span <= 0 || maxPoints <= 0 || start < 0 {
 		return 60
 	}
 	bucket := span / int64(maxPoints)
@@ -934,6 +934,23 @@ func autoBucket(start, end int64, maxPoints int) int64 {
 	}
 	if bucket < 60 {
 		bucket = 60
+	}
+	return fitSeriesBucket(start, end, maxPoints, bucket)
+}
+
+// fitSeriesBucket widens an existing whole-minute bucket if its aligned point
+// count is too large. Alignment means point counts need not decrease at every
+// increase in width, so check the actual requested width as well as defaults.
+func fitSeriesBucket(start, end int64, maxPoints int, bucket int64) int64 {
+	for end/bucket-start/bucket+1 > int64(maxPoints) {
+		// While the starting bucket stays at its current index or moves
+		// backward, a narrower candidate than this cannot fit the end bucket.
+		// Jump past those impossible widths instead of scanning minute by minute.
+		minimum := end/(start/bucket+int64(maxPoints)) + 1
+		if rem := minimum % 60; rem != 0 {
+			minimum += 60 - rem
+		}
+		bucket = max(bucket+60, minimum)
 	}
 	return bucket
 }

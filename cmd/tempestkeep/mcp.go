@@ -26,12 +26,9 @@ func cmdMCP(args []string) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	if fs.NArg() != 0 {
-		return usagef("mcp does not accept positional arguments")
-	}
 	if *versionFlag {
-		fmt.Printf("tempestkeep mcp %s\n", version.String())
-		return nil
+		_, err := fmt.Printf("tempestkeep mcp %s\n", version.String())
+		return err
 	}
 
 	ctx, stop := signalContext()

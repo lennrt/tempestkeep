@@ -251,7 +251,7 @@ func TestFillPressureTrend(t *testing.T) {
 	}
 	closeOnCleanup(t, st)
 
-	var c ConditionsOut
+	c := ConditionsOut{Source: "archive", Time: localTimeStr(base + 3*3600)}
 	fillPressureTrend(context.Background(), st, &c)
 	if c.PressureTrend != "falling rapidly" {
 		t.Errorf("pressure_trend = %q, want falling rapidly", c.PressureTrend)

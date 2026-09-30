@@ -1,0 +1,17 @@
+{
+  "name": "tempestkeep-development-tools",
+  "private": true,
+  "description": "Development-only specification checks for the TempestKeep Go project",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "spec:check": "openspec validate --all --strict --no-interactive",
+    "spec:list": "openspec list --specs",
+    "openspec": "openspec"
+  },
+  "devDependencies": {
+    "@fission-ai/openspec": "1.13.2"
+  }
+}

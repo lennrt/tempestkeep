@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/rand/v2"
 	"mime"
 	"net"
@@ -276,7 +277,7 @@ func cacheable(path string) bool {
 	return !strings.HasPrefix(path, "observations/device/")
 }
 
-func (c *Client) get(ctx context.Context, path string, q url.Values, out any) error {
+func (c *Client) get(ctx context.Context, path string, q url.Values, out any, validate func() error) error {
 	if c == nil || c.baseURL == nil || c.http == nil || c.token == "" {
 		return fmt.Errorf("%w: API client is nil or not initialized", ErrInvalidArgument)
 	}
@@ -286,10 +287,7 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 	key := path + "?" + q.Encode() // token not yet added -> stable, token-independent key
 	if cacheable(path) {
 		if b, ok := c.cacheGet(key); ok {
-			if err := json.Unmarshal(b, out); err != nil {
-				return fmt.Errorf("%w: cached %s response is invalid", ErrMalformedResponse, operation(path))
-			}
-			return nil
+			return decodeResponse(b, path, out, validate)
 		}
 	}
 
@@ -301,11 +299,140 @@ func (c *Client) get(ctx context.Context, path string, q url.Values, out any) er
 	if err != nil {
 		return err
 	}
+	if err := decodeResponse(body, path, out, validate); err != nil {
+		return err
+	}
 	if cacheable(path) {
 		c.cachePut(key, body)
 	}
+	return nil
+}
+
+func decodeResponse(body []byte, path string, out any, validate func() error) error {
+	var envelope *struct {
+		Status *struct {
+			Code *int `json:"status_code"`
+		} `json:"status"`
+		Observations json.RawMessage `json:"obs"`
+		Stations     json.RawMessage `json:"stations"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil || envelope == nil {
+		return fmt.Errorf("%w: %s response is invalid", ErrMalformedResponse, operation(path))
+	}
+	if path == "stations" && len(envelope.Stations) == 0 ||
+		strings.HasPrefix(path, "observations/") && len(envelope.Observations) == 0 {
+		return fmt.Errorf("%w: %s response is missing its collection", ErrMalformedResponse, operation(path))
+	}
+	// WeatherFlow can report an application failure in a successful HTTP
+	// response. Never mistake that for an empty observation window. Omitted
+	// status remains supported; server-provided messages never enter errors.
+	if envelope.Status != nil && (envelope.Status.Code == nil || *envelope.Status.Code != 0) {
+		return fmt.Errorf("%w: %s response reports an unsuccessful API status", ErrMalformedResponse, operation(path))
+	}
+	// Check collection sizes before allocating slices of decoded stations,
+	// sensors, or forecasts. Visit every occurrence of a collection key: decoding
+	// only the last raw field would miss allocations caused by earlier duplicates.
+	// EqualFold matches encoding/json's field matching, including Unicode folds.
+	// The raw JSON itself is bounded by maxResponseSize.
+	boundsErr := visitJSONObject(body, func(key string, raw json.RawMessage) error {
+		switch {
+		case path == "stations" && strings.EqualFold(key, "stations"):
+			return boundedJSONArray(raw, maxStations, func(station json.RawMessage) error {
+				return visitJSONObject(station, func(key string, devices json.RawMessage) error {
+					if strings.EqualFold(key, "devices") {
+						return boundedJSONArray(devices, maxDevicesPerStation, nil)
+					}
+					return nil
+				})
+			})
+		case strings.HasPrefix(path, "observations/device/") && strings.EqualFold(key, "obs"):
+			return boundedJSONArray(raw, maxDeviceObs, func(row json.RawMessage) error {
+				// REST appends four derived rain fields to the 18 sensor fields.
+				return boundedJSONArray(row, model.DeviceObsFields+4, nil)
+			})
+		case strings.HasPrefix(path, "observations/station/") && strings.EqualFold(key, "obs"):
+			return boundedJSONArray(raw, maxStationObs, nil)
+		case path == "better_forecast" && strings.EqualFold(key, "forecast"):
+			return visitJSONObject(raw, func(key string, forecast json.RawMessage) error {
+				switch {
+				case strings.EqualFold(key, "daily"):
+					return boundedJSONArray(forecast, maxDailyForecasts, nil)
+				case strings.EqualFold(key, "hourly"):
+					return boundedJSONArray(forecast, maxHourlyForecasts, nil)
+				}
+				return nil
+			})
+		}
+		return nil
+	})
+	if boundsErr != nil {
+		return fmt.Errorf("%w: %s collections are invalid or exceed their limits", ErrMalformedResponse, operation(path))
+	}
 	if err := json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("%w: %s response is invalid", ErrMalformedResponse, operation(path))
+	}
+	if validate != nil {
+		return validate()
+	}
+	return nil
+}
+
+// visitJSONObject preserves duplicate keys while inspecting collection-bearing
+// objects. Its input has already passed JSON syntax validation. Optional nested
+// objects may be null, matching encoding/json's typed decoding behavior.
+func visitJSONObject(raw json.RawMessage, visit func(string, json.RawMessage) error) error {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := decoder.Token(); err != nil || token != json.Delim('{') {
+		return ErrMalformedResponse
+	}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return ErrMalformedResponse
+		}
+		key, ok := token.(string)
+		if !ok {
+			return ErrMalformedResponse
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return ErrMalformedResponse
+		}
+		if err := visit(key, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// boundedJSONArray scans one raw array without building a typed slice. Optional
+// collections may be omitted or null. visit can bound nested collections before
+// the full response is decoded. The enclosing JSON has already been validated.
+func boundedJSONArray(raw json.RawMessage, maximum int, visit func(json.RawMessage) error) error {
+	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('[') {
+		return ErrMalformedResponse
+	}
+	for count := 0; decoder.More(); count++ {
+		if count >= maximum {
+			return ErrMalformedResponse
+		}
+		var item json.RawMessage
+		if err := decoder.Decode(&item); err != nil {
+			return ErrMalformedResponse
+		}
+		if visit != nil {
+			if err := visit(item); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -401,7 +528,12 @@ func (c *Client) fetchOnce(ctx context.Context, path, u string) (body []byte, re
 }
 
 func parseRetryAfter(value string, now time.Time) time.Duration {
-	if secs, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && secs > 0 {
+	if secs, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); secs > 0 && (err == nil || errors.Is(err, strconv.ErrRange)) {
+		// Saturate before converting seconds to nanoseconds. The retry policy
+		// applies its own lower cap, even for a header larger than int64.
+		if secs > math.MaxInt64/int64(time.Second) {
+			return time.Duration(math.MaxInt64)
+		}
 		return time.Duration(secs) * time.Second
 	}
 	if at, err := http.ParseTime(value); err == nil && at.After(now) {
@@ -477,16 +609,19 @@ func (c *Client) Stations(ctx context.Context) ([]Station, error) {
 	var out struct {
 		Stations []Station `json:"stations"`
 	}
-	if err := c.get(ctx, "stations", url.Values{}, &out); err != nil {
-		return nil, err
-	}
-	if len(out.Stations) > maxStations {
-		return nil, fmt.Errorf("%w: stations response exceeds %d stations", ErrMalformedResponse, maxStations)
-	}
-	for index := range out.Stations {
-		if err := validateStation(out.Stations[index]); err != nil {
-			return nil, fmt.Errorf("%w: station %d: %w", ErrMalformedResponse, index, err)
+	validate := func() error {
+		if len(out.Stations) > maxStations {
+			return fmt.Errorf("%w: stations response exceeds %d stations", ErrMalformedResponse, maxStations)
 		}
+		for index := range out.Stations {
+			if err := validateStation(out.Stations[index]); err != nil {
+				return fmt.Errorf("%w: station %d: %w", ErrMalformedResponse, index, err)
+			}
+		}
+		return nil
+	}
+	if err := c.get(ctx, "stations", url.Values{}, &out, validate); err != nil {
+		return nil, err
 	}
 	return out.Stations, nil
 }
@@ -517,10 +652,11 @@ func finiteInRange(value, minimum, maximum float64) bool {
 	return value >= minimum && value <= maximum
 }
 
-// PickTempestDevice selects the station and device id to archive from a station
-// list: the first Tempest ("ST") device found, or, if the token owns only older
-// Air/Sky hardware, the first device of the first station, so a non-Tempest
-// account still works. It reports false only when no station has any device.
+// PickTempestDevice selects the first Tempest ("ST") device from a station
+// list. If none exists, it selects the first available device for station-level
+// live observations. Raw archive collection requires a Tempest; Air/Sky rows
+// use different layouts and DeviceObservations rejects them. It reports false
+// only when no station has any device.
 // The returned station and its Devices slice are owned copies. This is the pure
 // selection rule shared by the CLI and MCP server; FindTempestDevice adds the
 // live lookup.
@@ -607,19 +743,22 @@ func (c *Client) LatestStationObs(ctx context.Context, stationID int) (*StationO
 		Obs []StationObs `json:"obs"`
 	}
 	path := fmt.Sprintf("observations/station/%d", stationID)
-	if err := c.get(ctx, path, siUnits(), &out); err != nil {
-		return nil, err
-	}
-	if len(out.Obs) > maxStationObs {
-		return nil, fmt.Errorf("%w: station observations response exceeds %d rows", ErrMalformedResponse, maxStationObs)
-	}
-	if len(out.Obs) == 0 {
-		return nil, ErrNoObservation
-	}
-	for index := range out.Obs {
-		if err := validateStationObs(out.Obs[index]); err != nil {
-			return nil, fmt.Errorf("%w: station observation %d: %w", ErrMalformedResponse, index, err)
+	validate := func() error {
+		if len(out.Obs) > maxStationObs {
+			return fmt.Errorf("%w: station observations response exceeds %d rows", ErrMalformedResponse, maxStationObs)
 		}
+		if len(out.Obs) == 0 {
+			return ErrNoObservation
+		}
+		for index := range out.Obs {
+			if err := validateStationObs(out.Obs[index]); err != nil {
+				return fmt.Errorf("%w: station observation %d: %w", ErrMalformedResponse, index, err)
+			}
+		}
+		return nil
+	}
+	if err := c.get(ctx, path, siUnits(), &out, validate); err != nil {
+		return nil, err
 	}
 	return &out.Obs[len(out.Obs)-1], nil
 }
@@ -676,6 +815,8 @@ const MaxDeviceWindow = 5 * 24 * time.Hour
 // It makes a single request, so the window must be no wider than MaxDeviceWindow;
 // chunking a long backfill is the caller's job. A malformed row fails the whole
 // response so callers never mistake partial data for a complete time window.
+// Present device identity and observation-type fields must match the request
+// and the obs_st format. Every returned timestamp must fall inside the window.
 func (c *Client) DeviceObservations(ctx context.Context, deviceID int, start, end int64) ([]model.DeviceObs, error) {
 	if deviceID <= 0 {
 		return nil, fmt.Errorf("%w: device id must be positive", ErrInvalidArgument)
@@ -693,11 +834,19 @@ func (c *Client) DeviceObservations(ctx context.Context, deviceID int, start, en
 	q.Set("time_start", strconv.FormatInt(start, 10))
 	q.Set("time_end", strconv.FormatInt(end, 10))
 	var out struct {
-		Obs [][]*float64 `json:"obs"`
+		DeviceID *int         `json:"device_id"`
+		Type     *string      `json:"type"`
+		Obs      [][]*float64 `json:"obs"`
 	}
 	path := fmt.Sprintf("observations/device/%d", deviceID)
-	if err := c.get(ctx, path, q, &out); err != nil {
+	if err := c.get(ctx, path, q, &out, nil); err != nil {
 		return nil, err
+	}
+	if out.DeviceID != nil && *out.DeviceID != deviceID {
+		return nil, fmt.Errorf("%w: device observations belong to a different device", ErrMalformedResponse)
+	}
+	if out.Type != nil && *out.Type != "obs_st" {
+		return nil, fmt.Errorf("%w: device observations require the Tempest obs_st format", ErrMalformedResponse)
 	}
 	if len(out.Obs) > maxDeviceObs {
 		return nil, fmt.Errorf("%w: device observations response exceeds %d rows", ErrMalformedResponse, maxDeviceObs)
@@ -707,6 +856,9 @@ func (c *Client) DeviceObservations(ctx context.Context, deviceID int, start, en
 		o, err := model.DeviceObsFromRow(row)
 		if err != nil {
 			return nil, fmt.Errorf("%w: obs_st row %d: %w", ErrMalformedResponse, index, err)
+		}
+		if o.Epoch < start || o.Epoch > end {
+			return nil, fmt.Errorf("%w: obs_st row %d is outside the requested time range", ErrMalformedResponse, index)
 		}
 		obs = append(obs, o)
 	}
@@ -770,35 +922,39 @@ func (c *Client) BetterForecast(ctx context.Context, stationID int) (*Forecast, 
 	q := siUnits()
 	q.Set("station_id", strconv.Itoa(stationID))
 	var f Forecast
-	if err := c.get(ctx, "better_forecast", q, &f); err != nil {
+	if err := c.get(ctx, "better_forecast", q, &f, func() error { return validateForecast(f) }); err != nil {
 		return nil, err
 	}
+	return &f, nil
+}
+
+func validateForecast(f Forecast) error {
 	if len(f.Forecast.Daily) > maxDailyForecasts || len(f.Forecast.Hourly) > maxHourlyForecasts {
-		return nil, fmt.Errorf("%w: forecast response exceeds entry limits", ErrMalformedResponse)
+		return fmt.Errorf("%w: forecast response exceeds entry limits", ErrMalformedResponse)
 	}
 	if !boundedText(f.CurrentConditions.Conditions) || !boundedText(f.CurrentConditions.Icon) {
-		return nil, fmt.Errorf("%w: forecast text exceeds %d bytes", ErrMalformedResponse, maxTextBytes)
+		return fmt.Errorf("%w: forecast text exceeds %d bytes", ErrMalformedResponse, maxTextBytes)
 	}
 	if err := validateForecastCurrent(f.CurrentConditions); err != nil {
-		return nil, fmt.Errorf("%w: current forecast: %w", ErrMalformedResponse, err)
+		return fmt.Errorf("%w: current forecast: %w", ErrMalformedResponse, err)
 	}
 	for index, day := range f.Forecast.Daily {
 		if !boundedText(day.Conditions) || !boundedText(day.Icon) || !boundedText(day.PrecipType) {
-			return nil, fmt.Errorf("%w: daily forecast text exceeds %d bytes", ErrMalformedResponse, maxTextBytes)
+			return fmt.Errorf("%w: daily forecast text exceeds %d bytes", ErrMalformedResponse, maxTextBytes)
 		}
 		if err := validateDailyForecast(day); err != nil {
-			return nil, fmt.Errorf("%w: daily forecast %d: %w", ErrMalformedResponse, index, err)
+			return fmt.Errorf("%w: daily forecast %d: %w", ErrMalformedResponse, index, err)
 		}
 	}
 	for index, hour := range f.Forecast.Hourly {
 		if !boundedText(hour.Conditions) || !boundedText(hour.Icon) {
-			return nil, fmt.Errorf("%w: hourly forecast text exceeds %d bytes", ErrMalformedResponse, maxTextBytes)
+			return fmt.Errorf("%w: hourly forecast text exceeds %d bytes", ErrMalformedResponse, maxTextBytes)
 		}
 		if err := validateHourlyForecast(hour); err != nil {
-			return nil, fmt.Errorf("%w: hourly forecast %d: %w", ErrMalformedResponse, index, err)
+			return fmt.Errorf("%w: hourly forecast %d: %w", ErrMalformedResponse, index, err)
 		}
 	}
-	return &f, nil
+	return nil
 }
 
 func validateForecastCurrent(current ForecastCurrent) error {

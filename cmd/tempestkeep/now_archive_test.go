@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -20,6 +21,69 @@ import (
 const nowStationsJSON = `{"stations":[{"station_id":123,"name":"Test Station","latitude":0,"longitude":0,"timezone":"UTC","station_meta":{"elevation":10},"devices":[{"device_id":456,"device_type":"ST","serial_number":"ST-TEST"}]}]}`
 
 const nowObsJSON = `{"obs":[{"timestamp":1700000000,"air_temperature":20.5,"relative_humidity":45,"sea_level_pressure":1013,"wind_avg":2,"wind_gust":4,"wind_direction":180,"uv":5,"solar_radiation":500,"feels_like":21,"dew_point":8,"precip_accum_local_day":1,"lightning_strike_count_last_1hr":2,"lightning_strike_last_distance":10}]}`
+
+func TestNowFallbackRequiresMatchingArchiveIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		deviceID          int
+		unknown, wantName bool
+	}{
+		{name: "matching device", deviceID: 456, wantName: true},
+		{name: "different device", deviceID: 999},
+		{name: "unknown device", deviceID: 456, unknown: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "archive.sqlite")
+			writer, err := store.OpenWriter(t.Context(), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := writer.InsertObs(t.Context(), tc.deviceID, []model.DeviceObs{{Epoch: 1700000000, AirTempC: new(20.0)}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if tc.unknown {
+				db, err := sql.Open("sqlite", path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.ExecContext(t.Context(), `ALTER TABLE obs_st RENAME COLUMN device_id TO legacy_device`); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			st, err := store.Open(t.Context(), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			closeOnCleanup(t, st)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/stations" {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(nowStationsJSON))
+					return
+				}
+				http.Error(w, "unavailable", http.StatusBadRequest)
+			}))
+			t.Cleanup(srv.Close)
+			client, err := api.New("synthetic-token", api.WithBaseURL(srv.URL))
+			if err != nil {
+				t.Fatal(err)
+			}
+			d, err := (nowConfig{live: &nowLiveSource{client: client}, store: st}).load(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (d.station != "") != tc.wantName || d.source != "archive" || d.tempF == nil || *d.tempF != 68 {
+				t.Fatalf("archive fallback inherited unverified station identity: %+v", d)
+			}
+		})
+	}
+}
 
 func TestFillArchiveRainTodaySumsIntervals(t *testing.T) {
 	// Keep both intervals in the requested day, even when CI runs at midnight.

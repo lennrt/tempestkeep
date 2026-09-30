@@ -35,14 +35,14 @@ func cmdCollect(args []string) error {
 	defer stop()
 
 	fs := flag.NewFlagSet("collect", flag.ContinueOnError)
-	describe(fs, "Build or refresh the local SQLite archive from the WeatherFlow REST API.\nA repeated run resumes after the last stored observation. Ctrl-C cancels the run.",
+	describe(fs, "Build or refresh the local SQLite archive from the WeatherFlow REST API.\nAn interrupted seed resumes its saved cursor. Later runs sync newer observations.\nCtrl-C cancels the run.",
 		"tempestkeep collect",
 		"tempestkeep collect --backfill-start 2023-01-01",
 		"tempestkeep collect --quiet   # for cron; progress off, errors still print")
 	db := fs.String("db", "", "archive path (or env TEMPEST_DB; default ./tempest.sqlite)")
 	deviceID := fs.Int("device-id", 0, "Tempest device id (or env TEMPEST_DEVICE_ID; auto-discovered if unset)")
 	backfillStart := fs.String("backfill-start", "", "earliest date to backfill on a fresh archive, YYYY-MM-DD (default: walk back until history ends)")
-	backupKeep := fs.Int("backup-keep", 7, "backup snapshots to keep in ./backups (0 disables)")
+	backupKeep := fs.Int("backup-keep", 7, "backup snapshots to keep in the backups directory beside the archive (0 disables, max 365)")
 	noBackup := fs.Bool("no-backup", false, "skip the post-run backup snapshot")
 	throttleMs := fs.Int("throttle-ms", 400, "pause between REST requests, milliseconds")
 	quiet := fs.Bool("quiet", false, "suppress progress/status output (errors still print)")
@@ -88,6 +88,23 @@ func cmdCollect(args []string) error {
 	if *throttleMs < 0 || *throttleMs > 60_000 {
 		return usagef("--throttle-ms must be between 0 and 60000")
 	}
+	var startEpoch int64
+	if *backfillStart != "" {
+		// Resolve calendar input before discovery or archive creation, so a bad
+		// date cannot become a network error or create an unused archive.
+		t, err := time.ParseInLocation(time.DateOnly, *backfillStart, time.Local)
+		if err != nil || len(*backfillStart) != len(time.DateOnly) {
+			return usagef("--backfill-start must be YYYY-MM-DD")
+		}
+		if t.Unix() < 0 {
+			return usagef("--backfill-start must not be before the Unix epoch")
+		}
+		if t.After(time.Now()) {
+			return usagef("--backfill-start must not be in the future")
+		}
+		// Observation epochs are positive; zero means open-ended collection.
+		startEpoch = max(t.Unix(), 1)
+	}
 
 	// Status/progress is diagnostics, not data: it goes to stderr (so a piped
 	// stdout stays clean) and is silenced by --quiet. Errors always print.
@@ -130,22 +147,6 @@ func cmdCollect(args []string) error {
 		}
 		dev = discovered
 		logf("Using the discovered Tempest device (override with --device-id).\n")
-	}
-
-	var startEpoch int64
-	if *backfillStart != "" {
-		// Local time, like every other date the tools accept ("2023-06-01" means
-		// the user's June 1st, not UTC's).
-		t, err := time.ParseInLocation("2006-01-02", *backfillStart, time.Local)
-		if err != nil {
-			return usagef("--backfill-start must be YYYY-MM-DD")
-		}
-		if t.After(time.Now()) {
-			// A future start would make an empty range whose walk silently
-			// fetches nothing; reject it instead of reporting a successful no-op.
-			return usagef("--backfill-start must not be in the future")
-		}
-		startEpoch = t.Unix()
 	}
 
 	w, err := store.OpenWriter(ctx, dbPath)
@@ -262,21 +263,26 @@ func cmdListDevices(args []string) error {
 	if *format == "json" {
 		return writeDevicesJSON(os.Stdout, stations)
 	}
+	return writeDevicesText(os.Stdout, stations)
+}
 
+// writeDevicesText normalizes API labels before sending them to a terminal.
+func writeDevicesText(w io.Writer, stations []api.Station) error {
+	out := textOutput{writer: w}
 	if len(stations) == 0 {
-		fmt.Println("No stations found for this token.")
-		return nil
+		out.println("No stations found for this token.")
+		return out.err
 	}
 	for _, s := range stations {
-		fmt.Printf("Station %d  %q  (%s)\n", s.StationID, s.Name, s.Timezone)
+		out.printf("Station %d  %q  (%s)\n", s.StationID, displayText(s.Name), displayText(s.Timezone))
 		if len(s.Devices) == 0 {
-			fmt.Println("  (no devices)")
+			out.println("  (no devices)")
 		}
 		for _, d := range s.Devices {
-			fmt.Printf("  device %d  type %s  serial %s\n", d.DeviceID, d.DeviceType, d.SerialNumber)
+			out.printf("  device %d  type %s  serial %s\n", d.DeviceID, displayText(d.DeviceType), displayText(d.SerialNumber))
 		}
 	}
-	return nil
+	return out.err
 }
 
 // deviceJSON / stationJSON are the machine-readable shape of `list-devices
