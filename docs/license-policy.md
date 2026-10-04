@@ -15,6 +15,17 @@ SPDX license identifiers:
 This list is an engineering policy. It is not legal advice or a compatibility
 assurance.
 
+## Complete packaged licenses
+
+`github.com/mattn/go-localereader v0.0.1` declared MIT but omitted the full
+license text. This caused the dependency license check to fail on native
+Windows, where the dependency enters the build.
+
+The repository pins `v0.0.2-0.20220822084749-2491eb6c1c75`, which includes the
+[upstream license-only commit](https://github.com/mattn/go-localereader/commit/2491eb6c1c75).
+That commit adds the complete MIT license without changing source code.
+The dependency uses the normal license check, without an exception.
+
 ## Tool exceptions
 
 `modernc.org/mathutil v1.7.1` is ignored by `go-licenses v1.6.0` because that

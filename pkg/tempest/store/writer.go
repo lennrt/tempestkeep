@@ -234,13 +234,23 @@ func validateBoundDevice(raw string, deviceID int) error {
 // Checkpoint flushes the write-ahead log back into the main database file and
 // truncates it. Call it before snapshotting the archive so a file copy captures
 // every committed row (WAL frames not yet checkpointed would otherwise be missed).
+// It returns ErrArchiveIO if an active reader prevents the checkpoint. Stop
+// collection writes until the snapshot copy has finished.
 func (w *Writer) Checkpoint(ctx context.Context) error {
 	db, err := w.database()
 	if err != nil {
 		return err
 	}
-	_, err = db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)")
-	return archiveFailure("checkpoint archive", err)
+	var busy, logFrames, checkpointedFrames int
+	if err := db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &logFrames, &checkpointedFrames); err != nil {
+		return archiveFailure("checkpoint archive", err)
+	}
+	// A blocked checkpoint is a successful SQL query with busy=1. Treating
+	// that as success would let a caller copy a main file missing WAL rows.
+	if busy != 0 || logFrames != checkpointedFrames {
+		return fmt.Errorf("%w: archive checkpoint is incomplete", ErrArchiveIO)
+	}
+	return nil
 }
 
 // InsertObs appends observations for a device in a single transaction and
@@ -252,7 +262,10 @@ func (w *Writer) InsertObs(ctx context.Context, deviceID int, obs []model.Device
 		return 0, fmt.Errorf("%w: device id must be positive", ErrInvalidArgument)
 	}
 	if len(obs) == 0 {
-		return 0, nil
+		if _, err := w.database(); err != nil {
+			return 0, err
+		}
+		return 0, ctx.Err()
 	}
 	if len(obs) > MaxInsertBatch {
 		return 0, fmt.Errorf("%w: observation batch exceeds %d rows", ErrInvalidArgument, MaxInsertBatch)

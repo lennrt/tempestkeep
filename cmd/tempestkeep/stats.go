@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"strings"
 	"time"
 
@@ -40,7 +39,7 @@ type statsReport struct {
 }
 
 func cmdStats(args []string) (err error) {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signalContext()
 	defer stop()
 	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
 	describe(fs, "tempestkeep stats: one-shot climate summary of the archive (coverage, records,\ntrend, and rain/wind/lightning/solar/comfort highlights). --format json for scripting.",
@@ -49,7 +48,7 @@ func cmdStats(args []string) (err error) {
 		"tempestkeep stats --format json | jq .records")
 	db := fs.String("db", "", "path to the tempest.sqlite archive (or env TEMPEST_DB)")
 	start := fs.String("start", "", "start date YYYY-MM-DD in local time (default: whole archive)")
-	end := fs.String("end", "", "end date YYYY-MM-DD in local time, inclusive (default: today)")
+	end := fs.String("end", "", "end date YYYY-MM-DD in local time, inclusive (default: now)")
 	format := fs.String("format", "text", "output format: text or json")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -221,6 +220,13 @@ func writeStats(w io.Writer, r statsReport) error {
 		out.printf("  not enough history for a trend (%d year(s))\n", r.trend.Years)
 	}
 
+	// Rain coverage counts every observed day, including days with no rain.
+	// Archive-wide coverage above may be nonempty while this selected range is not.
+	if r.rain.DaysObserved == 0 {
+		out.println("\nNo observations in the selected date range.")
+		return out.err
+	}
+
 	out.println("\nRain")
 	out.printf("  Total: %.2f in over %d days, %d rainy\n", r.rain.TotalIn, r.rain.DaysObserved, r.rain.RainyDays)
 	if r.rain.LongestDrySpellDays > 0 {
@@ -228,15 +234,20 @@ func writeStats(w io.Writer, r statsReport) error {
 	}
 
 	out.println("\nWind")
-	out.printf("  Average: %s, peak gust %s (%s), calm %.0f%%\n",
-		f1(r.wind.AvgWindMph, " mph"), f1(r.wind.PeakGustMph, " mph"), r.wind.PeakGustDay, r.wind.CalmPct)
+	calm := dash
+	if r.wind.Obs > 0 {
+		calm = fmt.Sprintf("%.0f%%", r.wind.CalmPct)
+	}
+	out.printf("  Average: %s, peak gust %s (%s), calm %s\n",
+		f1(r.wind.AvgWindMph, " mph"), f1(r.wind.PeakGustMph, " mph"), r.wind.PeakGustDay, calm)
 
 	out.println("\nLightning")
 	if r.light.TotalStrikes > 0 {
 		out.printf("  %d strikes over %d storm days; closest %s (%s)\n",
 			r.light.TotalStrikes, r.light.StormDays, f1(r.light.ClosestStrikeMi, " mi"), r.light.ClosestStrikeDay)
 	} else {
-		out.printf("  none detected; %d storm-free days\n", r.light.LongestStormFreeDays)
+		out.println("  no nonzero strike counts recorded")
+		out.printf("  Longest observed storm-free run: %d days; missing readings end runs\n", r.light.LongestStormFreeDays)
 	}
 
 	out.println("\nSolar")

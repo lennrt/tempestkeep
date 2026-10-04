@@ -20,6 +20,7 @@ func TestRunExitStatuses(t *testing.T) {
 		{name: "version", args: []string{"version"}, wantStatus: exitOK, wantOut: "tempestkeep "},
 		{name: "version flag", args: []string{"--version"}, wantStatus: exitOK, wantOut: "tempestkeep "},
 		{name: "help", args: []string{"help"}, wantStatus: exitOK, wantOut: "Usage:"},
+		{name: "help for version", args: []string{"help", "version"}, wantStatus: exitOK, wantOut: "Usage: tempestkeep version"},
 		{name: "help flag", args: []string{"-h"}, wantStatus: exitOK, wantOut: "Usage:"},
 		{name: "no arguments", args: nil, wantStatus: exitUsage, wantErr: "Usage:"},
 		{name: "unknown command", args: []string{"frobnicate"}, wantStatus: exitUsage, wantErr: `unknown command "frobnicate"`},

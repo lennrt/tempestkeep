@@ -26,7 +26,7 @@ func TestWriteStatsRendersSections(t *testing.T) {
 		rec:      store.Records{HottestF: f(99.5), ColdestF: f(20.1), PeakGustMph: f(41.2)},
 		trend:    store.TempTrend{Years: 3, SlopePerDecadeF: f(2.5), RSquared: f(0.8)},
 		rain:     store.RainStats{TotalIn: 12.3, DaysObserved: 90, RainyDays: 14, LongestDrySpellDays: 8, DrySpellStart: "2024-07-01", DrySpellEnd: "2024-07-08"},
-		wind:     store.WindStats{AvgWindMph: f(4.1), PeakGustMph: f(41.2), PeakGustDay: "2024-05-27", CalmPct: 33},
+		wind:     store.WindStats{Obs: 1000, AvgWindMph: f(4.1), PeakGustMph: f(41.2), PeakGustDay: "2024-05-27", CalmPct: 33},
 		light:    store.LightningStats{TotalStrikes: 42, StormDays: 3, ClosestStrikeMi: f(1.9), ClosestStrikeDay: "2024-08-04"},
 		solar:    store.SolarStats{PeakSolarWm2: f(1100), PeakUV: f(9), SunniestDayMJ: f(28.5), SunniestDay: "2024-06-21"},
 		comfort:  store.ComfortStats{HottestFeelsLikeF: f(105), HottestFeelsLikeDay: "2024-06-12", ColdestFeelsLikeF: f(10), ColdestFeelsLikeDay: "2024-01-15"},
@@ -98,6 +98,7 @@ func TestWriteStatsCoolingTrend(t *testing.T) {
 	rep := statsReport{
 		cov:   store.Coverage{Count: 10, MinEpoch: sql.NullInt64{Int64: 1700000000, Valid: true}, MaxEpoch: sql.NullInt64{Int64: 1700600000, Valid: true}},
 		trend: store.TempTrend{Years: 4, SlopePerDecadeF: f(-1.2)},
+		rain:  store.RainStats{DaysObserved: 10},
 		light: store.LightningStats{LongestStormFreeDays: 10},
 	}
 	var b strings.Builder
@@ -108,7 +109,7 @@ func TestWriteStatsCoolingTrend(t *testing.T) {
 	if !strings.Contains(out, "-1.2 °F/decade (cooling") {
 		t.Errorf("expected a cooling trend line; got:\n%s", out)
 	}
-	if !strings.Contains(out, "none detected") {
+	if !strings.Contains(out, "no nonzero strike counts recorded") {
 		t.Errorf("expected the no-lightning line; got:\n%s", out)
 	}
 }

@@ -76,7 +76,7 @@ func buildLiveDashboard(station *api.Station, o *api.StationObs, fc *api.Forecas
 				break
 			}
 			d.daily = append(d.daily, dailyCell{
-				label:      weekdayLabel(day.DayStartLocal, i),
+				label:      weekdayLabel(day.DayStartLocal, time.Now()),
 				icon:       glyphFor(day.Icon, day.Conditions),
 				conditions: day.Conditions,
 				hiF:        cToFptr(day.AirTempHigh),
@@ -381,11 +381,12 @@ func tempColor(f float64) lipgloss.Color {
 	}
 }
 
-func weekdayLabel(dayStartLocal int64, i int) string {
-	if i == 0 {
+func weekdayLabel(dayStartLocal int64, now time.Time) string {
+	day := time.Unix(dayStartLocal, 0).Local()
+	if day.Format(time.DateOnly) == now.Local().Format(time.DateOnly) {
 		return "Today"
 	}
-	return time.Unix(dayStartLocal, 0).Local().Format("Mon")
+	return day.Format("Mon")
 }
 
 func humanizeAge(d time.Duration) string {

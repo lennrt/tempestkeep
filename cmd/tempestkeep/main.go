@@ -93,10 +93,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 func dispatch(args []string, stdout, stderr io.Writer) error {
 	switch cmd := args[0]; cmd {
 	case "version", "-v", "--version":
+		if len(args) != 1 {
+			return usagef("version does not accept arguments")
+		}
 		_, err := fmt.Fprintf(stdout, "tempestkeep %s\n", version.String())
 		return err
 	case "help", "-h", "--help":
+		if len(args) > 2 {
+			return usagef("help accepts at most one command name")
+		}
 		if len(args) > 1 {
+			if args[1] == "version" {
+				_, err := fmt.Fprintln(stdout, "Usage: tempestkeep version\n\nPrint the installed version and exit.")
+				return err
+			}
 			// `tempestkeep help <cmd>` is `tempestkeep <cmd> -h`.
 			handler, ok := commands[args[1]]
 			if !ok {
@@ -195,6 +205,9 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 	err := fs.Parse(args)
 	switch {
 	case err == nil:
+		if fs.NArg() != 0 {
+			return usagef("%s does not accept positional arguments; use its named flags", fs.Name())
+		}
 		return nil
 	case errors.Is(err, flag.ErrHelp):
 		fs.SetOutput(os.Stdout)

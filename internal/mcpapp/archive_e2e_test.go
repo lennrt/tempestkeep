@@ -83,7 +83,8 @@ func writeObs(w http.ResponseWriter, epochs []int64) {
 
 // connectWritableServer builds the server exactly as main() does in write mode
 // (live + read-only store + writer) and returns an initialized in-memory client.
-func connectWritableServer(t *testing.T, ctx context.Context, token, dbPath string) *mcp.ClientSession {
+// Optional middleware lets tests observe server-side request lifecycles.
+func connectWritableServer(t *testing.T, ctx context.Context, token, dbPath string, middleware ...mcp.Middleware) *mcp.ClientSession {
 	t.Helper()
 	apiClient, err := newAPIClient(token)
 	if err != nil {
@@ -104,6 +105,7 @@ func connectWritableServer(t *testing.T, ctx context.Context, token, dbPath stri
 	srv := mcp.NewServer(&mcp.Implementation{Name: "tempestkeep", Version: "test"}, nil)
 	registerTools(srv, live, st)
 	registerArchiveTools(srv, live, writer)
+	srv.AddReceivingMiddleware(middleware...)
 
 	clientT, serverT := mcp.NewInMemoryTransports()
 	serverSession, err := srv.Connect(ctx, serverT, nil)

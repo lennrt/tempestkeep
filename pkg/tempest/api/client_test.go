@@ -128,6 +128,42 @@ func TestParseRetryAfter(t *testing.T) {
 	}
 }
 
+func TestParseRetryAfterLargeSeconds(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"9223372037", "9223372036854775807", "18446744073709551616"} {
+		t.Run(value, func(t *testing.T) {
+			got := parseRetryAfter(value, time.Now())
+			if got != time.Duration(math.MaxInt64) {
+				t.Fatalf("large Retry-After = %v, want saturated duration", got)
+			}
+		})
+	}
+}
+
+func TestMalformedResponseIsNotCached(t *testing.T) {
+	t.Parallel()
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			writeTestJSON(w, `{"stations":`)
+			return
+		}
+		writeTestJSON(w, stationsJSON)
+	}))
+	t.Cleanup(srv.Close)
+	client := newTestClient(t, srv.URL)
+	if _, err := client.Stations(t.Context()); !errors.Is(err, ErrMalformedResponse) {
+		t.Fatalf("first response = %v, want ErrMalformedResponse", err)
+	}
+	stations, err := client.Stations(t.Context())
+	if err != nil || len(stations) != 1 {
+		t.Fatalf("recovered response = %v, %v", stations, err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+}
+
 func TestLatestStationObsForcesSIUnits(t *testing.T) {
 	// Assert the request shape inside the handler (which runs synchronously
 	// during the call) to avoid sharing state across goroutines.

@@ -51,8 +51,9 @@ func cmdSetup(args []string) error {
 	}
 
 	fmt.Println(lipgloss.NewStyle().Padding(1, 2).Render(splashArt()))
-	fmt.Println(faint().Render("  This wizard writes " + *envPath + ", the one config file every\n" +
-		"  TempestKeep tool (CLI, TUI, and MCP server) reads. Ctrl+C to abort.\n"))
+	fmt.Println(faint().Render("  This wizard writes " + displayText(*envPath) + ".\n" +
+		"  Commands read .env from their working directory. If you choose another\n" +
+		"  path, load its settings into the process environment. Ctrl+C to abort.\n"))
 
 	// --- 1. Token, validated against the live API -------------------------
 	token := existing["TEMPEST_TOKEN"]
@@ -278,6 +279,9 @@ func printNextSteps(dbPath string) {
 	}
 	fmt.Printf("    %d. Give the data to Claude Code (or point any MCP client at tempestkeep mcp):\n", mcpStep)
 	fmt.Println(faint().Render("       Set TEMPEST_TOKEN in the MCP client's private environment first."))
+	if runtime.GOOS == "windows" {
+		fmt.Println(faint().Render("       Run this registration command in PowerShell."))
+	}
 	for _, line := range mcpRegistrationCommand(dbPath) {
 		fmt.Println(cmd.Render("         " + line))
 	}
@@ -307,10 +311,10 @@ func mcpRegistrationCommand(dbPath string) []string {
 	return lines
 }
 
-// commandArg quotes one path for the platform's common interactive shell.
+// commandArg quotes one literal path for PowerShell on Windows or a POSIX shell.
 func commandArg(value string) string {
 	if runtime.GOOS == "windows" {
-		return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
+		return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 	}
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
@@ -402,7 +406,13 @@ func writeEnvFile(path string, existing, updates map[string]string) error {
 		}
 		fmt.Fprintf(&b, "%s=%s\n", k, formatted)
 	}
-	return writePrivateFile(path, []byte(b.String()))
+	data := []byte(b.String())
+	// Formatting can grow a valid input file past the parser's size or line
+	// limits. Check the complete output before replacing usable configuration.
+	if _, err := config.ParseDotenv(data); err != nil {
+		return fmt.Errorf("validate environment output: %w", err)
+	}
+	return writePrivateFile(path, data)
 }
 
 // writePrivateFile atomically replaces a regular file with mode 0600.

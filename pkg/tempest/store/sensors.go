@@ -17,11 +17,13 @@ import (
 type lightningDay struct {
 	day       time.Time // local midnight
 	strikes   int64
+	readings  int64    // non-null strike-count readings, including measured zero
 	closestKm *float64 // nearest strike that day, nil when none
 }
 
 // LightningStats summarizes lightning in US display units. A storm day has at
-// least one detected strike. A coverage gap ends a storm-free run.
+// least one detected strike. A gap or a day without strike-count readings ends
+// a storm-free run. DaysObserved counts days with any observation.
 type LightningStats struct {
 	TotalStrikes int64 `json:"total_strikes"`
 	DaysObserved int64 `json:"days_observed"`
@@ -44,7 +46,7 @@ type LightningStats struct {
 }
 
 // LightningActivity aggregates lightning over [startEpoch, endEpoch]. A
-// coverage gap ends a storm-free run.
+// gap or a day without strike-count readings ends a storm-free run.
 func (s *Store) LightningActivity(ctx context.Context, startEpoch, endEpoch int64) (LightningStats, error) {
 	days, err := s.lightningDays(ctx, startEpoch, endEpoch)
 	if err != nil {
@@ -83,7 +85,7 @@ func (s *Store) LightningActivity(ctx context.Context, startEpoch, endEpoch int6
 		if !havePrev || !d.day.Equal(prev.AddDate(0, 0, 1)) {
 			freeLen = 0
 		}
-		if hadStorm {
+		if hadStorm || d.readings == 0 {
 			freeLen = 0
 		} else {
 			freeLen++
@@ -105,18 +107,20 @@ func (s *Store) LightningActivity(ctx context.Context, startEpoch, endEpoch int6
 // solarDay is one local calendar day of solar activity, in SI units.
 type solarDay struct {
 	day       time.Time // local midnight
-	energyMJ  float64   // integrated insolation, MJ/m²
+	energyMJ  float64   // estimated insolation, MJ/m²
 	peakWm2   *float64
 	peakUV    *float64
 	peakLux   *float64
-	hasEnergy bool // at least one bucket carried irradiance
+	hasEnergy bool // at least one sample carried irradiance and a positive interval
 }
 
 // SolarStats summarizes the solar/UV package over a date range, in mixed units
 // growers and forecasters use: irradiance in W/m², daily insolation in MJ/m²,
-// the UV index unitless, and illuminance in lux. Daily insolation integrates the
-// 15-minute bucket means over their span, so a day with coverage gaps reports the
-// energy actually observed rather than an extrapolated full day.
+// the UV index unitless, and illuminance in lux. Insolation is an estimate: each
+// selected solar reading is multiplied by its positive reported interval. A
+// missing or zero interval contributes no energy but retains the reading's peak.
+// The observation timestamp determines inclusion in the range and local day;
+// intervals are not clipped at boundaries or deduplicated when they overlap.
 type SolarStats struct {
 	DaysObserved int64 `json:"days_observed"`
 
@@ -132,16 +136,16 @@ type SolarStats struct {
 	SunniestDay   string   `json:"sunniest_day,omitempty"`
 	SunniestDayMJ *float64 `json:"sunniest_day_mj,omitempty"`
 
-	// AvgDailyInsolationMJ averages the daily insolation over days that carried at
-	// least one solar reading, so a fully dark-sensor day doesn't dilute it.
+	// AvgDailyInsolationMJ averages the daily estimate over days with at least one
+	// solar reading and a positive reported interval. Reported zero solar counts.
 	AvgDailyInsolationMJ *float64 `json:"avg_daily_insolation_mj,omitempty"`
 	TotalInsolationMJ    float64  `json:"total_insolation_mj"`
 }
 
 // SolarActivity aggregates the solar/UV package over [startEpoch, endEpoch]: the
 // peak irradiance, UV index, and illuminance with the days they occurred, plus
-// daily insolation (MJ/m²) integrated from the bucket means, its sunniest day,
-// and the average over days that carried a solar reading. It answers "how much
+// daily insolation (MJ/m²) estimated from reported intervals, its sunniest day,
+// and the average over days with usable solar intervals. It answers "how much
 // sun did the garden get?" and "when was UV worst?" offline.
 func (s *Store) SolarActivity(ctx context.Context, startEpoch, endEpoch int64) (SolarStats, error) {
 	days, err := s.solarDays(ctx, startEpoch, endEpoch)
@@ -221,8 +225,9 @@ type SensorHealth struct {
 // for each continuous sensor over [startEpoch, endEpoch], flagging any that last
 // reported more than an hour before the archive's newest observation as stale
 // (gone dark), plus the battery voltage range. The event sensors (rain,
-// lightning) are excluded: a null there usually means "nothing happened", not a
-// fault. A single scan gathers every count and last-seen epoch at once.
+// lightning) are excluded from this continuous-sensor diagnostic. Their null
+// values still mean missing data, distinct from measured zero. A single scan
+// gathers every count and last-seen epoch at once.
 func (s *Store) SensorHealthReport(ctx context.Context, startEpoch, endEpoch int64) (SensorHealth, error) {
 	var h SensorHealth
 	if err := validateEpochRange(startEpoch, endEpoch); err != nil {
@@ -448,7 +453,8 @@ type ComfortStats struct {
 // over [startEpoch, endEpoch]: the hottest and coldest "feels like" and the
 // muggiest day. It works from 15-minute bucket means, so the temperature,
 // humidity, and wind feeding each feels-like reading belong to the same quarter
-// hour rather than being averaged across the whole day.
+// hour rather than being averaged across the whole day. Heat index requires
+// humidity, wind chill requires wind, and mild air uses temperature alone.
 func (s *Store) ComfortStatistics(ctx context.Context, startEpoch, endEpoch int64) (ComfortStats, error) {
 	days, err := s.comfortDays(ctx, startEpoch, endEpoch)
 	if err != nil {
@@ -509,19 +515,19 @@ func (s *Store) comfortDays(ctx context.Context, startEpoch, endEpoch int64) (_ 
 		cur := &out[len(out)-1]
 
 		tF := model.CToF(tempC.Float64)
-		// Missing humidity or wind fall back to 0, matching current_conditions:
-		// the apparent-temp formulas ignore the missing side (dry air, still air)
-		// rather than refusing to report.
-		var rh, windMph float64
-		if hum.Valid {
-			rh = hum.Float64
+		// Match current_conditions: missing inputs cannot stand in for measured
+		// zero humidity or calm wind. Mild air needs neither additional sensor.
+		var feels *float64
+		switch {
+		case tF >= 80 && hum.Valid:
+			feels = new(model.ApparentTempF(tF, hum.Float64, 0))
+		case tF <= 50 && wind.Valid:
+			feels = new(model.ApparentTempF(tF, 0, model.MpsToMph(wind.Float64)))
+		case tF > 50 && tF < 80:
+			feels = &tF
 		}
-		if wind.Valid {
-			windMph = model.MpsToMph(wind.Float64)
-		}
-		feels := model.ApparentTempF(tF, rh, windMph)
-		cur.hottestFeels = maxPtr(cur.hottestFeels, &feels)
-		cur.coldestFeels = minPtr(cur.coldestFeels, &feels)
+		cur.hottestFeels = maxPtr(cur.hottestFeels, feels)
+		cur.coldestFeels = minPtr(cur.coldestFeels, feels)
 
 		if hum.Valid {
 			if dpC := model.DewPointC(tempC.Float64, hum.Float64); !math.IsNaN(dpC) {
@@ -657,9 +663,8 @@ func (s *Store) windDays(ctx context.Context, startEpoch, endEpoch int64) (_ []w
 }
 
 // solarDays rolls the observations in [startEpoch, endEpoch] up to local calendar
-// days, oldest first, integrating each 15-minute bucket's mean irradiance over
-// its span into daily insolation (see rollupBucketSeconds for the exact-day
-// argument; a bucket never straddles a local day).
+// days, oldest first. SQL sums sample irradiance times reported duration within
+// each bucket; Go assigns the result to the samples' local date.
 func (s *Store) solarDays(ctx context.Context, startEpoch, endEpoch int64) (_ []solarDay, err error) {
 	rows, err := s.queryRange(ctx, startEpoch, endEpoch, qrySolarRollup, rollupBucketSeconds, startEpoch, endEpoch)
 	if err != nil {
@@ -669,9 +674,9 @@ func (s *Store) solarDays(ctx context.Context, startEpoch, endEpoch int64) (_ []
 
 	var out []solarDay
 	for rows.Next() {
-		var b, solarN int64
-		var avgSolar, maxSolar, maxUV, maxLux sql.NullFloat64
-		if err := rows.Scan(&b, &avgSolar, &maxSolar, &maxUV, &maxLux, &solarN); err != nil {
+		var b int64
+		var energyMJ, maxSolar, maxUV, maxLux sql.NullFloat64
+		if err := rows.Scan(&b, &energyMJ, &maxSolar, &maxUV, &maxLux); err != nil {
 			return nil, archiveFailure("scan solar day", err)
 		}
 		t := time.Unix(b*rollupBucketSeconds, 0).Local()
@@ -680,10 +685,8 @@ func (s *Store) solarDays(ctx context.Context, startEpoch, endEpoch int64) (_ []
 			out = append(out, solarDay{day: day})
 		}
 		cur := &out[len(out)-1]
-		if avgSolar.Valid {
-			// Piecewise-constant integration: the bucket mean (W/m²) held over its
-			// span (rollupBucketSeconds), in MJ/m² (÷1e6 J→MJ).
-			cur.energyMJ += avgSolar.Float64 * rollupBucketSeconds / 1e6
+		if energyMJ.Valid {
+			cur.energyMJ += energyMJ.Float64
 			cur.hasEnergy = true
 		}
 		cur.peakWm2 = maxPtr(cur.peakWm2, nf(maxSolar))
@@ -695,7 +698,7 @@ func (s *Store) solarDays(ctx context.Context, startEpoch, endEpoch int64) (_ []
 
 // lightningDays rolls the observations in [startEpoch, endEpoch] up to local
 // calendar days, oldest first, following the same integer-bucket path as
-// dayAggregates (see rollupBucketSeconds for why the day assignment is exact).
+// dayAggregates (see the timezone assumption at rollupBucketSeconds).
 func (s *Store) lightningDays(ctx context.Context, startEpoch, endEpoch int64) (_ []lightningDay, err error) {
 	rows, err := s.queryRange(ctx, startEpoch, endEpoch, qryLightningRollup, rollupBucketSeconds, startEpoch, endEpoch)
 	if err != nil {
@@ -705,9 +708,9 @@ func (s *Store) lightningDays(ctx context.Context, startEpoch, endEpoch int64) (
 
 	var out []lightningDay
 	for rows.Next() {
-		var b, strikes, obs int64
+		var b, strikes, readings int64
 		var closest, farthest sql.NullFloat64
-		if err := rows.Scan(&b, &strikes, &closest, &farthest, &obs); err != nil {
+		if err := rows.Scan(&b, &strikes, &closest, &farthest, &readings); err != nil {
 			return nil, archiveFailure("scan lightning day", err)
 		}
 		t := time.Unix(b*rollupBucketSeconds, 0).Local()
@@ -717,6 +720,7 @@ func (s *Store) lightningDays(ctx context.Context, startEpoch, endEpoch int64) (
 		}
 		cur := &out[len(out)-1]
 		cur.strikes += strikes
+		cur.readings += readings
 		cur.closestKm = minPtr(cur.closestKm, nf(closest))
 	}
 	return out, archiveFailure("read lightning days", rows.Err())

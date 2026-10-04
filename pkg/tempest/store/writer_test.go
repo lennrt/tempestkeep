@@ -226,25 +226,39 @@ func TestConcurrentWritersCannotClaimDifferentDevices(t *testing.T) {
 }
 
 func TestArchivePathEscapesURIMetacharacters(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "weather?#archive.sqlite")
-	w, err := store.OpenWriter(context.Background(), path)
-	if err != nil {
-		t.Fatalf("OpenWriter: %v", err)
+	names := []string{"weather#archive.sqlite", "weather%20archive.sqlite", "weather archive.sqlite"}
+	// A question mark is a URI metacharacter but not a legal Windows filename.
+	if runtime.GOOS != "windows" {
+		names = append(names, "weather?#archive.sqlite")
 	}
-	if _, err := w.InsertObs(context.Background(), writeDevice, []model.DeviceObs{{Epoch: 100}}); err != nil {
-		t.Fatal(err)
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), name)
+			w, err := store.OpenWriter(t.Context(), path)
+			if err != nil {
+				t.Fatalf("OpenWriter: %v", err)
+			}
+			closeOnCleanup(t, w)
+			if _, err := w.InsertObs(t.Context(), writeDevice, []model.DeviceObs{{Epoch: 100}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("the exact requested filename was not created: %v", err)
+			}
+			s, err := store.Open(t.Context(), path)
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			closeOnCleanup(t, s)
+			latest, err := s.Latest(t.Context())
+			if err != nil || latest == nil || latest.Epoch != 100 {
+				t.Fatalf("read exact archive: latest=%v, error=%v", latest, err)
+			}
+		})
 	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("the exact requested filename was not created: %v", err)
-	}
-	s, err := store.Open(context.Background(), path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	closeOnCleanup(t, s)
 }
 
 func TestWriterMetaAndCheckpoint(t *testing.T) {
@@ -336,6 +350,31 @@ func TestInsertObsEmpty(t *testing.T) {
 	}
 	if _, err := w.InsertObs(t.Context(), 0, nil); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("invalid device error = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestInsertObsEmptyHonorsClosedAndCanceledState(t *testing.T) {
+	var nilWriter *store.Writer
+	for _, writer := range []*store.Writer{nilWriter, {}} {
+		if _, err := writer.InsertObs(t.Context(), writeDevice, nil); !errors.Is(err, store.ErrClosed) {
+			t.Fatalf("empty insert on uninitialized writer = %v, want ErrClosed", err)
+		}
+	}
+	writer, err := store.OpenWriter(t.Context(), filepath.Join(t.TempDir(), "archive.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeOnCleanup(t, writer)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := writer.InsertObs(ctx, writeDevice, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("empty insert after cancellation = %v, want context.Canceled", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.InsertObs(t.Context(), writeDevice, nil); !errors.Is(err, store.ErrClosed) {
+		t.Fatalf("empty insert after close = %v, want ErrClosed", err)
 	}
 }
 
