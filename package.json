@@ -16,7 +16,7 @@
     "app:screenshots": "node scripts/capture-mcp-app.mjs"
   },
   "devDependencies": {
-    "@fission-ai/openspec": "1.13.2",
+    "@fission-ai/openspec": "1.14.1",
     "@modelcontextprotocol/ext-apps": "2.0.3",
     "@playwright/test": "1.64.0",
     "esbuild": "0.28.2"
