@@ -294,11 +294,10 @@ func monthlyNormalsFrom(months []PeriodStat) []MonthNormal {
 	return out
 }
 
-// TempTrend is a least-squares warming/cooling trend fitted to monthly
-// temperature anomalies, each month's mean minus that calendar month's normal.
-// Working in anomalies removes the seasonal cycle, so the slope reflects the
-// underlying trend rather than which months the archive happens to cover, and a
-// partial year contributes each of its months against that month's own normal.
+// TempTrend is a least-squares warming/cooling trend with separate calendar-month
+// intercepts and equal weight per usable monthly mean. Centering both time and
+// temperature within each calendar month removes between-month differences from
+// the fit. The anomaly extrema use the archive's own calendar-month normals.
 type TempTrend struct {
 	Years      int64  `json:"years"`                 // distinct calendar years with a usable month
 	MonthsUsed int64  `json:"months_used"`           // month-anomalies that fed the fit
@@ -306,11 +305,10 @@ type TempTrend struct {
 	LastMonth  string `json:"last_month,omitempty"`
 
 	// SlopePerDecadeF is the fitted warming rate in °F per decade; positive is
-	// warming. Nil until the anomalies actually vary over time, which needs the
-	// same calendar month observed in more than one year (a single year, or years
-	// that never share a month, leave every anomaly at zero and carry no trend).
+	// warming. Nil until a calendar month has usable means in more than one year.
+	// Repeated constant temperatures identify a zero slope.
 	SlopePerDecadeF *float64 `json:"slope_per_decade_f,omitempty"`
-	RSquared        *float64 `json:"r_squared,omitempty"` // fit quality, 0..1
+	RSquared        *float64 `json:"r_squared,omitempty"` // within-month fit, 0..1; nil for zero temperature variance
 
 	WarmestAnomalyF *float64 `json:"warmest_anomaly_f,omitempty"`
 	WarmestMonth    string   `json:"warmest_month,omitempty"`
@@ -318,13 +316,12 @@ type TempTrend struct {
 	ColdestMonth    string   `json:"coldest_month,omitempty"`
 }
 
-// TemperatureTrend fits a linear trend to the whole archive's monthly temperature
-// anomalies (each month's mean against its calendar-month normal) and reports the
-// slope in °F per decade, the fit's R², and the warmest and coldest months
-// relative to normal. It builds on the monthly PeriodSummary and MonthlyNormals,
-// so the anomaly baseline is the archive's own climatology. A short archive
-// (under two calendar years) yields no slope, since one year of data defines its
-// own normals and every anomaly collapses to zero.
+// TemperatureTrend fits a common yearly slope with a separate intercept for each
+// calendar month, giving every usable monthly mean equal weight. It reports the
+// slope in °F per decade, within-month R², and the warmest and coldest anomalies
+// against the archive's own normals. A month observed only once contributes no
+// trend information. If no calendar month repeats, the slope and R² are absent.
+// Repeated constant temperatures yield a zero slope and absent R².
 func (s *Store) TemperatureTrend(ctx context.Context) (TempTrend, error) {
 	start, end, ok, err := s.archiveRange(ctx)
 	if err != nil || !ok {
@@ -341,9 +338,34 @@ func (s *Store) TemperatureTrend(ctx context.Context) (TempTrend, error) {
 	for _, n := range normals {
 		normAvg[n.Month] = n.TempAvgF
 	}
+	// Sum offsets from each group's first sample, rather than absolute years or
+	// temperatures. Centering these small values avoids cancellation from large
+	// year squares and keeps truly constant temperature groups exactly constant.
+	var groups [13]struct {
+		firstYear                int
+		firstTemp                float64
+		yearOffsets, tempOffsets float64
+		count                    int64
+	}
+	for _, m := range months {
+		if m.TempAvgF == nil {
+			continue
+		}
+		t, perr := time.Parse("2006-01", m.Period)
+		if perr != nil {
+			continue // defensive: PeriodSummary always emits YYYY-MM
+		}
+		group := &groups[int(t.Month())]
+		if group.count == 0 {
+			group.firstYear, group.firstTemp = t.Year(), *m.TempAvgF
+		}
+		group.count++
+		group.yearOffsets += float64(t.Year() - group.firstYear)
+		group.tempOffsets += *m.TempAvgF - group.firstTemp
+	}
 
 	var tt TempTrend
-	var sumX, sumY, sumXY, sumXX, sumYY float64
+	var sumXY, sumXX, sumYY float64
 	years := map[int]bool{}
 	for _, m := range months {
 		if m.TempAvgF == nil {
@@ -358,15 +380,14 @@ func (s *Store) TemperatureTrend(ctx context.Context) (TempTrend, error) {
 			continue
 		}
 		anom := *m.TempAvgF - *na
-		// Decimal year at mid-month keeps the x-axis in years, so the slope is
-		// directly °F/year (×10 for the reported per-decade rate).
-		x := float64(t.Year()) + (float64(t.Month())-0.5)/12
-
-		sumX += x
-		sumY += anom
-		sumXY += x * anom
+		group := &groups[int(t.Month())]
+		// A month has the same fractional-year position in every year; that
+		// constant cancels when time is centered within its calendar-month group.
+		x := float64(t.Year()-group.firstYear) - group.yearOffsets/float64(group.count)
+		y := (*m.TempAvgF - group.firstTemp) - group.tempOffsets/float64(group.count)
+		sumXY += x * y
 		sumXX += x * x
-		sumYY += anom * anom
+		sumYY += y * y
 		tt.MonthsUsed++
 		years[t.Year()] = true
 		if tt.FirstMonth == "" {
@@ -386,19 +407,13 @@ func (s *Store) TemperatureTrend(ctx context.Context) (TempTrend, error) {
 	}
 	tt.Years = int64(len(years))
 
-	if len(years) >= 2 {
-		n := float64(tt.MonthsUsed)
-		denom := n*sumXX - sumX*sumX   // variance in time
-		spreadY := n*sumYY - sumY*sumY // variance in the anomalies
-		// Both must vary to fit a line. spreadY is zero when every anomaly is
-		// identical (all zero), which happens when no calendar month is observed in
-		// more than one year (each month is then its own normal); report no slope
-		// rather than a meaningless zero.
-		if denom > 0 && spreadY > 0 {
-			cov := n*sumXY - sumX*sumY
-			perDecade := (cov / denom) * 10
-			tt.SlopePerDecadeF = &perDecade
-			r2 := (cov * cov) / (denom * spreadY) // Pearson R²
+	if sumXX > 0 {
+		perDecade := (sumXY / sumXX) * 10
+		tt.SlopePerDecadeF = &perDecade
+		if sumYY > 0 {
+			// Squared within-month correlation. Clamp floating-point rounding at
+			// the mathematical boundaries; a flat response has undefined R².
+			r2 := min(1, max(0, (sumXY*sumXY)/(sumXX*sumYY)))
 			tt.RSquared = &r2
 		}
 	}

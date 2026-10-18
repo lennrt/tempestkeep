@@ -15,7 +15,8 @@ lifetime.
    which configuration is missing and point to `/tempestkeep:setup`.
 2. Call `archive_status`. Report the stored date span, row count, and large gaps.
 3. If older history is needed, call `backfill_archive`. Pass `start` only when
-   the user supplies a target date. Leave `end` unset to use the saved cursor.
+   the user supplies a target date. Leave `end` and `before_epoch` unset to use
+   the saved cursor.
    Keep the default `max_days`.
 4. After each successful call, report covered dates and rows added. If
    `has_more` is true and the call budget remains, repeat the same arguments.
@@ -27,15 +28,18 @@ lifetime.
 
 If a call fails, report the error without sensitive identifiers. Committed rows
 remain available. Do not claim that a tool error includes a usable resume
-result. Explain that a backfill call without `end` resumes saved progress.
+result. A backfill call without `end` or `before_epoch` resumes saved progress.
 Keep the same `start` when the user supplied a target date. Do not retry
 failures in a tight loop.
 
 If the oldest stored date already reaches the target, skip older backfill and
 continue with sync. That date alone does not prove complete coverage. Report
-large gaps separately. An explicit `start` and `end` gap repair does not advance
-the shared resume cursor. Do not repeat an unchanged explicit window to
-continue a larger repair.
+large gaps separately. An explicit `end` or `before_epoch` gap repair does not
+advance the shared resume cursor. If it returns `has_more`, pass `next_before`
+as `before_epoch` and repeat `start` and `max_days`. Omit `end` on that call.
+Do not convert the cursor to a date because it can fall within a local day.
+After an error, repeat the failed explicit request. Committed rows remain safe
+to replay.
 
 End with the number of write calls used and any remaining work. If records
 help answer the user's question, label them as records within this archive.

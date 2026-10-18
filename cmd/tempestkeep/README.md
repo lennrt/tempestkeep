@@ -71,7 +71,9 @@ bin/tempestkeep list-devices
 
 This output includes station and device identifiers. Keep it private. If your
 token can access several devices, select the intended Tempest device for
-collection with `--device-id` or `TEMPEST_DEVICE_ID`.
+CLI collection or MCP with `--device-id` or `TEMPEST_DEVICE_ID`. For MCP, this
+also sets the default live station; explicit tool station arguments can override
+individual reads. See the [MCP selection rules](../../docs/mcp.md#capabilities).
 
 ## Collection
 
@@ -92,8 +94,28 @@ bin/tempestkeep collect --backfill-start 2025-01-01
 ```
 
 The date starts at midnight in the process timezone. The flag does not request
-an older gap repair on an archive that already has a watermark. For that case,
-use an explicit `backfill_archive` window through [MCP](../../docs/mcp.md#build-an-archive).
+an older gap repair on an archive that already has a watermark.
+
+To repair a gap or collect a selected historical period, provide both dates:
+
+```sh
+bin/tempestkeep collect --start 2025-06-01 --end 2025-06-30
+```
+
+This mode requests only the selected local calendar days, including the entire
+end date. If the end date is today, it requests observations only through the
+current time. Both flags are required. A range may contain at most 366 calendar
+days, including 23-hour or 25-hour days across daylight-saving changes. Dates
+before the Unix epoch, future end dates, and reversed ranges are rejected
+before API requests or archive creation.
+
+An explicit range can populate a new archive or revisit rows older than the
+current watermark. Existing observations are preserved, and repeated runs do
+not add duplicates. It leaves saved seed and MCP sync progress unchanged.
+It ignores `TEMPEST_BACKFILL_START`; combining the range flags with an explicit
+`--backfill-start` flag is an error. Missing upstream observations remain missing.
+The [MCP backfill tool](../../docs/mcp.md#build-an-archive) also supports selected
+historical windows, with an exclusive end date instead.
 
 Each API request covers at most five days. Each successful chunk commits before
 the next request. The `(device_id, epoch)` key prevents duplicate rows when a
@@ -107,7 +129,9 @@ bin/tempestkeep collect --quiet
 
 SIGINT and SIGTERM cancel collection. An interrupted run exits with a failure
 status and preserves committed rows and resume metadata. Rerun the same command
-to continue.
+to continue. For an explicit range, repeat the same `--start` and `--end`
+arguments. Earlier committed chunks are replayed safely before collection
+reaches the unfinished part; this mode does not save a separate range cursor.
 
 After successful collection, the command checkpoints SQLite's write-ahead log
 (WAL), which holds recent database changes. It then closes the writer and makes
@@ -167,9 +191,22 @@ Both dates are local calendar dates. The end date includes the entire day.
 Without a start date, the range starts at the beginning of the archive.
 Without an end date, the range ends at the current time.
 
+Both `stats` and `export` reject unsupported dates before loading configuration
+or opening an archive. Resolved UTC timestamps must fall between 1970-01-01
+00:00:00 and 9999-12-31 23:59:59. The inclusive bounds can differ by at most
+36,600 days. Invalid ranges return usage status 2. Valid dates still use local
+calendar boundaries, including 23-hour and 25-hour daylight-saving days.
+
 The range applies to rain, wind, lightning, solar, pressure, comfort, and
 weather-spell sections. Coverage, records, and temperature trend always
 summarize the whole archive. This remains true in JSON output.
+
+The rain section shows unavailable rainfall when no rain readings exist. A
+measured zero remains `0.00 in`. Sample counts show how many stored observations
+reported rain, and a partial-coverage warning identifies totals based on only
+some readings. These counts do not prove continuous weather coverage.
+In JSON, `rain.total_in` is a number or explicit `null`; `rain.observations` and
+`rain.rain_readings` are always present. Missing rain does not hide other sections.
 
 Reports use US display units for temperature, wind, pressure, and rain.
 The command reads the archive without contacting WeatherFlow. See the
@@ -207,6 +244,36 @@ CSV represents missing sensor readings as empty fields. JSON Lines omits the
 corresponding key. A missing temperature is not 0°C. See the
 [query guide](../../docs/querying.md#units-and-aggregation) for interval totals
 and aggregation rules.
+
+Add `--metadata` to include stored observation context:
+
+```sh
+bin/tempestkeep export --format jsonl --metadata
+```
+
+The flag appends these CSV columns after the existing sensor columns. JSON Lines
+adds the corresponding keys when their stored values are present:
+
+| Field | Meaning |
+|---|---|
+| `device_id` | Device identifier stored with the observation. |
+| `report_interval_min` | Report interval in minutes. |
+| `wind_interval_s` | Wind sampling interval in seconds. |
+| `precip_type` | Stored precipitation code: 0 none, 1 rain, 2 hail, 3 rain and hail. |
+| `source` | Stored observation source, such as `rest`. |
+
+These fields retain their stored values and units under `--units us`. Missing
+values stay empty in CSV or absent in JSON; a known zero stays zero. If an older
+archive lacks a metadata column, its values are missing. Source text is limited
+to 1,024 UTF-8 bytes per row. Longer or invalid UTF-8 source values fail the
+export rather than being silently changed. Omitting `--metadata` preserves the existing output.
+
+Use `solar_wm2 * report_interval_min * 60 / 1000000` for each row's solar-energy
+estimate in MJ/m². Match the archive report by including only present solar
+readings with report intervals greater than zero and no more than 1,440 minutes.
+For example, 100 W/m² over one minute gives 0.006 MJ/m². Missing intervals cannot
+be reconstructed from an assumed sampling rate. This estimate does not establish
+continuous sensor coverage or replace a restorable archive backup.
 
 Exports contain private weather observations. For a saved export on Unix-like
 systems, use a protected destination and an owner-only creation mask:

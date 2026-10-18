@@ -540,7 +540,7 @@ func TestTemperatureSpells(t *testing.T) {
 func TestTemperatureTrend(t *testing.T) {
 	// Three years, one January and one July reading each, warming 2°C/year in both
 	// months. Anomalies (vs each month's normal) run -3.6, 0, +3.6 °F, a clean
-	// upward trend, so the fitted slope must be positive with a strong R².
+	// upward trend with an exact 36°F/decade slope and within-month R² of one.
 	mk := func(y int, mo time.Month, tempC float64) obsRow {
 		return obsRow{epoch: time.Date(y, mo, 15, 12, 0, 0, 0, time.Local).Unix(), tempC: new(tempC)}
 	}
@@ -561,12 +561,11 @@ func TestTemperatureTrend(t *testing.T) {
 	if tt.SlopePerDecadeF == nil || *tt.SlopePerDecadeF <= 0 {
 		t.Fatalf("slope = %v, want a positive (warming) rate", tt.SlopePerDecadeF)
 	}
-	// 2°C/year ≈ 3.6°F/year ≈ 36°F/decade; allow slack for the mid-month x spread.
-	if *tt.SlopePerDecadeF < 25 || *tt.SlopePerDecadeF > 45 {
-		t.Errorf("slope = %v °F/decade, want ~36", *tt.SlopePerDecadeF)
+	if !almost(*tt.SlopePerDecadeF, 36) {
+		t.Errorf("slope = %v °F/decade, want 36", *tt.SlopePerDecadeF)
 	}
-	if tt.RSquared == nil || *tt.RSquared < 0.9 {
-		t.Errorf("R² = %v, want a strong fit (>0.9)", tt.RSquared)
+	if tt.RSquared == nil || !almost(*tt.RSquared, 1) {
+		t.Errorf("R² = %v, want 1", tt.RSquared)
 	}
 	if !strings.HasPrefix(tt.WarmestMonth, "2024") || !strings.HasPrefix(tt.ColdestMonth, "2022") {
 		t.Errorf("warmest/coldest = %s/%s, want a 2024/2022 month", tt.WarmestMonth, tt.ColdestMonth)

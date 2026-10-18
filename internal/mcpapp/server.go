@@ -32,6 +32,11 @@ type Options struct {
 	DBPath   string
 	ReadOnly bool
 
+	// DeviceID selects an accessible Tempest (ST) device and its default station.
+	// Zero preserves automatic discovery. Resolution is lazy; without a live
+	// client this option does not restrict archive-only reads.
+	DeviceID int
+
 	// Transport carries the JSON-RPC session. A nil Transport means stdio,
 	// which is what the tempestkeep command uses. Tests supply an in-memory
 	// transport from mcp.NewInMemoryTransports so the whole server, including
@@ -43,6 +48,9 @@ type Options struct {
 func Run(ctx context.Context, opts Options) (err error) {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if opts.DeviceID < 0 {
+		return fmt.Errorf("device id must be zero for discovery or positive")
 	}
 
 	var (
@@ -59,7 +67,7 @@ func Run(ctx context.Context, opts Options) (err error) {
 		}
 	}
 	if client != nil {
-		live = &liveSource{client: client}
+		live = &liveSource{client: client, selectedDeviceID: opts.DeviceID}
 	}
 
 	// Open the writer first. It creates the schema before the read handle opens.
@@ -147,15 +155,19 @@ func readOnlyNote(readOnly bool) string {
 // liveSource resolves and caches one station and device. Failed lookups are not
 // cached, so later calls can retry.
 type liveSource struct {
-	client   *api.Client
-	mu       sync.Mutex
-	station  *api.Station
-	deviceID int
+	client           *api.Client
+	selectedDeviceID int // Immutable configuration; zero means automatic discovery.
+	mu               sync.Mutex
+	station          *api.Station
+	deviceID         int
 }
 
 // resolveStation returns the cached station or resolves it. It is safe for
 // concurrent use. It caches only successful results.
 func (l *liveSource) resolveStation(ctx context.Context) (*api.Station, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	l.mu.Lock()
 	if l.station != nil {
 		station := l.station
@@ -168,9 +180,9 @@ func (l *liveSource) resolveStation(ctx context.Context) (*api.Station, error) {
 	if err != nil {
 		return nil, err
 	}
-	s, deviceID, ok := api.PickTempestDevice(stations)
-	if !ok {
-		return nil, fmt.Errorf("no stations found for this token")
+	s, deviceID, err := selectLiveDevice(stations, l.selectedDeviceID)
+	if err != nil {
+		return nil, err
 	}
 	l.mu.Lock()
 	if l.station == nil {
@@ -181,6 +193,28 @@ func (l *liveSource) resolveStation(ctx context.Context) (*api.Station, error) {
 	log.Print("live station access is ready")
 	warnTimezoneMismatch(s.Timezone)
 	return station, nil
+}
+
+func selectLiveDevice(stations []api.Station, selected int) (*api.Station, int, error) {
+	if selected == 0 {
+		station, deviceID, ok := api.PickTempestDevice(stations)
+		if !ok {
+			return nil, 0, fmt.Errorf("no stations found for this token")
+		}
+		return station, deviceID, nil
+	}
+	for i := range stations {
+		for _, device := range stations[i].Devices {
+			if device.DeviceID != selected {
+				continue
+			}
+			if device.DeviceType != "ST" {
+				return nil, 0, fmt.Errorf("configured device is not a Tempest (ST) device")
+			}
+			return &stations[i], selected, nil
+		}
+	}
+	return nil, 0, fmt.Errorf("configured Tempest device not found for this token")
 }
 
 // resolveDevice returns the device id whose history the archive tools collect,

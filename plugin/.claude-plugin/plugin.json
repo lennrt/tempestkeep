@@ -1,7 +1,7 @@
 {
   "name": "tempestkeep",
   "displayName": "TempestKeep",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "MCP tools and interactive MCP Apps for live and archived Tempest data.",
   "author": {
     "name": "Lennart Rudolph",

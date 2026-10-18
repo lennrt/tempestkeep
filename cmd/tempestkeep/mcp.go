@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/lennrt/tempestkeep/internal/mcpapp"
 	"github.com/lennrt/tempestkeep/internal/version"
@@ -21,10 +22,16 @@ func cmdMCP(args []string) error {
 		"tempestkeep mcp --db ./tempest.sqlite",
 		"tempestkeep mcp --read-only")
 	dbFlag := fs.String("db", "", "path to the tempest.sqlite archive (or env TEMPEST_DB)")
+	deviceFlag := fs.Int("device-id", 0, "default Tempest device id (or env TEMPEST_DEVICE_ID; auto-discovered if unset)")
 	readOnlyFlag := fs.Bool("read-only", false, "remove archive write tools (or env TEMPEST_READ_ONLY)")
 	versionFlag := fs.Bool("version", false, "print the version and exit")
 	if err := parseFlags(fs, args); err != nil {
 		return err
+	}
+	deviceSet := false
+	fs.Visit(func(f *flag.Flag) { deviceSet = deviceSet || f.Name == "device-id" })
+	if deviceSet && *deviceFlag <= 0 {
+		return usagef("--device-id must be positive")
 	}
 	if *versionFlag {
 		_, err := fmt.Printf("tempestkeep mcp %s\n", version.String())
@@ -34,6 +41,10 @@ func cmdMCP(args []string) error {
 	ctx, stop := signalContext()
 	defer stop()
 	if err := config.LoadDotenv(ctx, ".env"); err != nil {
+		return err
+	}
+	deviceID, err := resolveMCPDeviceID(*deviceFlag)
+	if err != nil {
 		return err
 	}
 	dbPath, err := config.ResolveDB(ctx, *dbFlag)
@@ -53,8 +64,26 @@ func cmdMCP(args []string) error {
 	return mcpapp.Run(ctx, mcpapp.Options{
 		Client:   client,
 		DBPath:   dbPath,
+		DeviceID: deviceID,
 		ReadOnly: *readOnlyFlag || envReadOnly,
 	})
+}
+
+// resolveMCPDeviceID receives either a validated positive flag or zero when the
+// flag was absent. An explicit flag must not parse an overridden environment.
+func resolveMCPDeviceID(flagValue int) (int, error) {
+	if flagValue > 0 {
+		return flagValue, nil
+	}
+	value := os.Getenv("TEMPEST_DEVICE_ID")
+	if value == "" {
+		return 0, nil
+	}
+	id, err := strconv.Atoi(value)
+	if err != nil || id < 0 {
+		return 0, fmt.Errorf("TEMPEST_DEVICE_ID must be zero for discovery or a positive integer")
+	}
+	return id, nil
 }
 
 // readOnlyEnv parses TEMPEST_READ_ONLY. Unknown values are an error so a

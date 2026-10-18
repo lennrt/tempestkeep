@@ -52,9 +52,17 @@ With a token and write access, the MCP server creates a new archive at the
 configured path. Without write access, the archive must already exist.
 Restart the client after changing the environment.
 
-Explain that each archive belongs to one Tempest device. MCP selects the first
-Tempest device found for the token. `TEMPEST_DEVICE_ID` changes CLI collection
-only, so it does not choose the MCP device.
+Explain that each archive belongs to one Tempest device. If the token has
+several devices, use `list_stations` to find the intended Tempest (`ST`) device.
+Reuse the user's existing choice, or ask which device to collect. Set its ID in
+the private MCP environment as `TEMPEST_DEVICE_ID`, or use `mcp --device-id`.
+Restart the client after changing the selection. Empty or zero environment
+values keep automatic selection of the first Tempest device.
+
+An inaccessible selection fails its first live use without choosing another
+device. An explicit tool `station_id` changes that read only; it does not select
+the archive's collection device. Do not change devices to bypass an archive
+identity error. Use the correct device or a separate archive.
 
 ## Test the configured sources
 

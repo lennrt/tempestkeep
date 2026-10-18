@@ -64,6 +64,7 @@ var (
 	qryPressureRollup  = mustQuery("pressure_rollup.sql")
 	qrySensorHealth    = mustQuery("sensor_health.sql")
 	qryPressureAt      = mustQuery("pressure_at.sql")
+	qryPressureAfter   = mustQuery("pressure_after.sql")
 	qryRecordsExtremes = mustQuery("records_extremes.sql")
 	qryThisDay         = mustQuery("this_day.sql")
 	qryWindRoseSectors = mustQuery("wind_rose_sectors.sql")
@@ -77,6 +78,7 @@ var (
 	qryMetaSet         = mustQuery("meta_set.sql")
 	qryMetaBindDevice  = mustQuery("meta_bind_device.sql")
 	qryDeviceIDs       = mustQuery("device_ids.sql")
+	qryArchiveMetadata = mustQuery("archive_metadata.sql")
 )
 
 // qryLatest and qryRange share obsColumns into their templates, so the SELECT
@@ -89,6 +91,8 @@ var (
 // epochOfTmpl substitutes an internal column name into epoch_of.sql. The
 // column is always one of our own constants, never user input.
 var epochOfTmpl = mustTemplate("epoch_of.sql")
+
+var archiveRangeTmpl = mustTemplate("archive_range.sql")
 
 // epochOfSQL renders the epoch-lookup query for one obs_st column.
 func epochOfSQL(col string) string {

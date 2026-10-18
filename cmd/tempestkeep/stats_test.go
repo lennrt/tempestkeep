@@ -25,7 +25,7 @@ func TestWriteStatsRendersSections(t *testing.T) {
 		cov:      store.Coverage{Count: 1000, MinEpoch: sql.NullInt64{Int64: 1700000000, Valid: true}, MaxEpoch: sql.NullInt64{Int64: 1700600000, Valid: true}},
 		rec:      store.Records{HottestF: f(99.5), ColdestF: f(20.1), PeakGustMph: f(41.2)},
 		trend:    store.TempTrend{Years: 3, SlopePerDecadeF: f(2.5), RSquared: f(0.8)},
-		rain:     store.RainStats{TotalIn: 12.3, DaysObserved: 90, RainyDays: 14, LongestDrySpellDays: 8, DrySpellStart: "2024-07-01", DrySpellEnd: "2024-07-08"},
+		rain:     store.RainStats{TotalIn: f(12.3), Observations: 1000, RainReadings: 1000, DaysObserved: 90, RainyDays: 14, LongestDrySpellDays: 8, DrySpellStart: "2024-07-01", DrySpellEnd: "2024-07-08"},
 		wind:     store.WindStats{Obs: 1000, AvgWindMph: f(4.1), PeakGustMph: f(41.2), PeakGustDay: "2024-05-27", CalmPct: 33},
 		light:    store.LightningStats{TotalStrikes: 42, StormDays: 3, ClosestStrikeMi: f(1.9), ClosestStrikeDay: "2024-08-04"},
 		solar:    store.SolarStats{PeakSolarWm2: f(1100), PeakUV: f(9), SunniestDayMJ: f(28.5), SunniestDay: "2024-06-21"},
@@ -44,8 +44,8 @@ func TestWriteStatsRendersSections(t *testing.T) {
 		"99.5°F", // hottest
 		"+2.5 °F/decade (warming",
 		"R²=0.80",
-		"12.30 in over 90 days",
-		"Longest dry spell: 8 days",
+		"12.30 in over 90 observed days",
+		"Longest observed dry spell: 8 days",
 		"calm 33%",
 		"42 strikes over 3 storm days",
 		"closest 1.9 mi",
@@ -111,5 +111,20 @@ func TestWriteStatsCoolingTrend(t *testing.T) {
 	}
 	if !strings.Contains(out, "no nonzero strike counts recorded") {
 		t.Errorf("expected the no-lightning line; got:\n%s", out)
+	}
+}
+
+func TestWriteStatsFlatTrend(t *testing.T) {
+	rep := statsReport{
+		cov: store.Coverage{Count: 2, MinEpoch: sql.NullInt64{Int64: 1700000000, Valid: true},
+			MaxEpoch: sql.NullInt64{Int64: 1731622400, Valid: true}},
+		trend: store.TempTrend{Years: 2, SlopePerDecadeF: new(0.0)},
+	}
+	var out strings.Builder
+	if err := writeStats(&out, rep); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "+0.0 °F/decade (flat)") || strings.Contains(out.String(), "warming") || strings.Contains(out.String(), "R²=") {
+		t.Fatalf("flat trend was mislabeled: %s", out.String())
 	}
 }

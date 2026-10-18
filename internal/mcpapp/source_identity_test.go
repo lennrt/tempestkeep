@@ -112,7 +112,9 @@ func TestCurrentConditionsArchivePressureFreshnessAndRate(t *testing.T) {
 		pressureSpan, latestDelay int64
 		wantRate                  bool
 	}{
-		{name: "too little history", pressureSpan: 3*3600 - 1},
+		{name: "too little history", pressureSpan: 3*3600/2 - 1},
+		{name: "exact half window", pressureSpan: 3 * 3600 / 2, wantRate: true},
+		{name: "short two hours", pressureSpan: 2 * 3600, wantRate: true},
 		{name: "exact three hours", pressureSpan: 3 * 3600, wantRate: true},
 		{name: "sparse six hours", pressureSpan: 6 * 3600, wantRate: true},
 		{name: "recent pressure", pressureSpan: 3 * 3600, latestDelay: 3599, wantRate: true},
@@ -156,7 +158,7 @@ func TestCurrentConditionsArchivePressureFreshnessAndRate(t *testing.T) {
 			}
 			// The dedicated historical tool retains the actual span and delta,
 			// even when this trend cannot enrich the latest conditions response.
-			if tc.pressureSpan >= 3*3600 {
+			if tc.pressureSpan >= 3*3600/2 {
 				var history PressureTrendOut
 				callTool(t, t.Context(), cs, "pressure_trend", nil, &history)
 				if history.At != pressureAt || math.Abs(history.ChangeInHg-model.MbToInHg(-6)) > 1e-9 {
@@ -164,5 +166,41 @@ func TestCurrentConditionsArchivePressureFreshnessAndRate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestArchivePressureUsesNearestEligibleReading(t *testing.T) {
+	const latest = int64(1700000000)
+	path := filepath.Join(t.TempDir(), "archive.sqlite")
+	writer, err := store.OpenWriter(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeOnCleanup(t, writer)
+	if _, err := writer.InsertObs(t.Context(), 456, []model.DeviceObs{
+		{Epoch: latest - 14400, PressureMb: new(1000.0)},
+		{Epoch: latest - 10740, PressureMb: new(1010.0)},
+		{Epoch: latest, PressureMb: new(1004.0), AirTempC: new(20.0)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cs := connectArchiveServer(t, t.Context(), path)
+	var conditions ConditionsOut
+	callTool(t, t.Context(), cs, "current_conditions", nil, &conditions)
+	wantRate := -6.0 * 10800 / 10740
+	if conditions.PressureTrend != "falling rapidly" || conditions.PressureTrend3hInHg == nil ||
+		math.Abs(*conditions.PressureTrend3hInHg-model.MbToInHg(wantRate)) > 1e-9 {
+		t.Fatalf("nearest pressure did not control current conditions: %+v", conditions)
+	}
+	var history PressureTrendOut
+	callTool(t, t.Context(), cs, "pressure_trend", nil, &history)
+	if history.Category != "falling rapidly" || history.At != latest ||
+		math.Abs(history.WindowHours-10740.0/3600) > 1e-12 ||
+		math.Abs(history.ChangeInHg-model.MbToInHg(-6)) > 1e-9 ||
+		math.Abs(history.ChangeMbPer3h-wantRate) > 1e-9 {
+		t.Fatalf("nearest pressure history lost its actual span or normalized rate: %+v", history)
 	}
 }

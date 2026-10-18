@@ -53,6 +53,11 @@ For history queries, `end` includes the full local end day. For
 `backfill_archive`, `end` is exclusive local midnight. Use the returned range
 when describing results.
 
+To continue an explicit backfill window, pass `next_before` as `before_epoch`.
+Omit `end` and repeat `start` and `max_days`. Use the exact epoch because a
+batch can stop within a local date. Omit both upper bounds to resume the
+separate shared cursor.
+
 Rain and lightning values are increments per report interval. Sum `rain_mm`
 and `strike_count` for totals. Do not average them or multiply them by interval
 length. Use `MAX(wind_gust)` for peak gusts and `AVG(wind_avg)` for mean wind.
@@ -69,6 +74,9 @@ day. The estimate does not clip boundaries or subtract overlaps.
 For `get_observations`, gust and UV values are bucket maxima. Wind and pressure
 are bucket means. Rain and lightning are bucket totals. Read the applied bucket
 width before describing a chart's resolution.
+Its `rain_readings` and `lightning_readings` fields count available samples.
+A zero count means its total is unknown. A positive count with a zero total
+means measured zero. A count below `obs` means partial coverage.
 
 ## Account for missing observations
 
@@ -94,6 +102,9 @@ archive records, because missing history can hide a larger event.
 Describe `climate_normals` as the baseline of the available archive. Do not
 call it a standard long-term climate normal. Explain how partial years,
 gaps, or station changes limit an inferred temperature trend.
+The trend fits one slope with a separate baseline for each calendar month.
+Its R² describes the fit within calendar months, not statistical significance.
+Repeated constant temperatures return zero slope with no R².
 
 Use `forecast` for expected weather when live access exists. A pressure trend
 alone does not establish that a storm will occur. Archived pressure is station

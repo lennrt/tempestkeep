@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.4.0 (proposed, unreleased)
+
+### Added
+
+- Explicit CLI archive repair with paired inclusive `collect --start` and
+  `--end` dates, bounded to 366 calendar days and safe to replay.
+- Exact `before_epoch` continuation for MCP backfill, including batches that
+  stop inside a daylight-saving transition day.
+- `rain_readings` and `lightning_readings` counts in observation-series buckets,
+  with missing-value displays and incomplete-coverage notices in MCP Apps.
+- Pointer, touch, and keyboard inspection for every returned chart point,
+  including dense series above 60 readings.
+- Optional `export --metadata` fields for device ID, report interval, wind
+  interval, precipitation type, and source. Defaults remain unchanged.
+- Read-only streaming access to stored observation metadata through
+  `store.ArchiveObs` and `Store.EachArchiveObs`.
+- MCP `--device-id` and `TEMPEST_DEVICE_ID` selection for collection and the
+  default live station, with lazy resolution and explicit station overrides.
+- A searchable Devices table in the `list_stations` app, with parent stations,
+  exact identifiers, bounded traversal, and compatible refresh state.
+- Observation and rain-reading counts in rain summaries, with missing/partial
+  coverage guidance in CLI reports, MCP results, and the rainfall app view.
+
+### Changed
+
+- Preserve table search, sorting, dataset selection, and valid page position
+  across compatible refreshes. New requests and changed table structures reset
+  controls. Focused search text and selection survive a pending refresh.
+- Center both time and temperature by calendar month in the trend fit, so
+  uneven seasonal coverage does not dilute the within-month slope.
+- Report zero slope for repeated constant monthly temperatures and omit the
+  undefined R². See [ADR 0009](docs/adr/0009-seasonal-trend-estimation.md).
+- Bump active development, plugin, and embedded app metadata to 0.4.0.
+- Choose the nearest eligible pressure sample on either side of the requested
+  window start. Sparse history can now use a pair spanning at least half the
+  window, and an older sample can no longer mask a closer reading after it.
+- Reject unsupported CLI report and export dates before configuration or archive
+  access, with usage status 2 and unchanged local calendar boundaries.
+- Return a null rain summary total when no rain readings exist. Preserve measured
+  zero and sum only reported values in partially observed ranges.
+- Lead the docs overview with multi-station workflows and guides to interactive
+  charts, table refresh, archive repair, metadata exports, and offline analysis.
+
+### Compatibility
+
+Archive recovery adds a `before_epoch` input to `backfill_archive` and two
+reading-count fields to `get_observations` points. Existing numeric totals
+keep their types; a zero count means its total is unknown, and a count below
+`obs` means partial coverage. Exported `SeriesPoint` gains the corresponding
+fields. See [ADR 0008](docs/adr/0008-archive-recovery-and-coverage.md).
+
+Default CSV columns and JSON Lines fields remain unchanged. `--metadata` appends
+five CSV columns and optional JSON fields. Metadata retains its stored units in
+SI and US exports. Older schemas expose unavailable metadata as missing. The
+store API additions do not change `model.Obs`. See
+[ADR 0010](docs/adr/0010-export-metadata-and-development-version.md).
+
+MCP now honors `TEMPEST_DEVICE_ID`; empty or zero keeps automatic selection.
+An invalid or inaccessible selection does not fall back to another live device.
+Sparse pressure results can change because comparison samples now match the
+documented nearest-reading rule. See
+[ADR 0011](docs/adr/0011-mcp-device-selection-and-pressure-samples.md).
+
+`RainStats.TotalIn` changes from `float64` to `*float64`; Go callers must check
+for nil. CLI rain JSON and MCP `rain_stats` now always encode `total_in` as a
+number or `null`, with `observations` and `rain_readings` counts. Consumers must
+accept null and the additional fields. Day counts, thresholds, spell rules,
+and other rain aggregate types retain their contracts. Counts describe samples,
+not continuous coverage. See [ADR 0012](docs/adr/0012-rain-summary-coverage.md).
+
+Existing archives need no migration. Version 0.4.0 remains a development target;
+no tag, release, plugin publication, or merge is part of this change.
+Qualification still follows [RELEASING.md](RELEASING.md).
+
 ## 0.3.0 (proposed, unreleased)
 
 ### Added

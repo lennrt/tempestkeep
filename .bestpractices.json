@@ -38,7 +38,7 @@
   "version_unique_status": "Met",
   "version_unique_justification": "Each source revision has a unique Git commit ID. Release policy requires unique, immutable SemVer tags; the -dev label alone is not used as a release identifier. https://github.com/lennrt/tempestkeep/blob/main/RELEASING.md",
   "version_semver_status": "Met",
-  "version_semver_justification": "Version metadata uses 0.2.0 and the release process requires vMAJOR.MINOR.PATCH tags and SemVer artifact versions. https://github.com/lennrt/tempestkeep/blob/main/internal/version/VERSION https://github.com/lennrt/tempestkeep/blob/main/RELEASING.md",
+  "version_semver_justification": "Version metadata uses 0.4.0 and the release process requires vMAJOR.MINOR.PATCH tags and SemVer artifact versions. https://github.com/lennrt/tempestkeep/blob/main/internal/version/VERSION https://github.com/lennrt/tempestkeep/blob/main/RELEASING.md",
   "version_tags_status": "Unmet",
   "version_tags_justification": "There are no published stable releases or release tags yet. Future approved releases require immutable signed SemVer tags. https://github.com/lennrt/tempestkeep/tags https://github.com/lennrt/tempestkeep/blob/main/RELEASING.md",
   "release_notes_status": "Met",

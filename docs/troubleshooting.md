@@ -88,6 +88,11 @@ make sure that your collection method selects the device that owns the archive.
 
 Repeated `sync_archive` calls retrieve new data, not historical gaps. For a
 gap, use the bounded `backfill_archive` example in the [MCP guide](mcp.md#build-an-archive).
+Continue an explicit MCP request with its exact `next_before` as `before_epoch`.
+Repeat `start` and `max_days`, and omit `end`. For CLI repair, use
+`tempestkeep collect --start YYYY-MM-DD --end YYYY-MM-DD` with both local dates
+included. Repeat the same CLI range after interruption. Explicit repair leaves
+ordinary collection progress unchanged.
 WeatherFlow can return no data for a gap that the API cannot recover.
 
 If collection reports invalid checkpoint metadata, preserve the archive and
@@ -114,8 +119,10 @@ the database manually. Transfer a completed backup or export between machines.
 ## Recover an archive from a backup
 
 Use a completed SQLite backup for recovery. CSV and JSON Lines exports omit
-collector metadata and some stored columns. TempestKeep does not provide an
-export-import command that reconstructs the archive.
+collector progress metadata. Default exports also omit observation metadata;
+`export --metadata` includes available stored intervals and provenance.
+TempestKeep does not provide an export-import command that reconstructs the
+archive.
 
 1. Stop TempestKeep processes that write to the affected archive.
 2. Copy a known-good backup to a new, unused local archive path.

@@ -278,11 +278,12 @@ func nf(n sql.NullFloat64) *float64 {
 	return nil
 }
 
-func scanObs(rows *sql.Rows) (model.Obs, error) {
+func scanObs(rows *sql.Rows, extra ...any) (model.Obs, error) {
 	var o model.Obs
 	var lull, avg, gust, dir, pmb, temp, hum, lux, uv, solar, rain, sdist, scount, batt sql.NullFloat64
-	if err := rows.Scan(&o.Epoch, &lull, &avg, &gust, &dir, &pmb, &temp, &hum,
-		&lux, &uv, &solar, &rain, &sdist, &scount, &batt); err != nil {
+	destinations := []any{&o.Epoch, &lull, &avg, &gust, &dir, &pmb, &temp, &hum,
+		&lux, &uv, &solar, &rain, &sdist, &scount, &batt}
+	if err := rows.Scan(append(destinations, extra...)...); err != nil {
 		return o, err
 	}
 	o.WindLullMps, o.WindAvgMps, o.WindGustMps, o.WindDirDeg = nf(lull), nf(avg), nf(gust), nf(dir)
@@ -460,10 +461,11 @@ func pressureTendency(mbPer3h float64) string {
 
 // PressureTendency measures the change in station pressure over the trailing
 // windowSeconds (3 hours is the meteorological standard). It reads the newest
-// pressure and the reading nearest the window's start. It reports false when the
-// archive lacks a pressure reading, or when the two samples are closer than half
-// the window (too little history for a meaningful trend). The reported window is
-// the actual span between the samples, so a sparse archive is not misrepresented.
+// pressure and the earlier reading nearest the window's start, considering only
+// pairs separated by at least half the window (rounded up to a positive whole
+// second). Equally near readings use the older sample. It reports false when no
+// eligible pair exists. The reported window is the actual span between the
+// samples, so a sparse archive is not misrepresented.
 func (s *Store) PressureTendency(ctx context.Context, windowSeconds int64) (*PressureTrend, bool, error) {
 	if windowSeconds <= 0 {
 		windowSeconds = 3 * 3600
@@ -473,7 +475,7 @@ func (s *Store) PressureTendency(ctx context.Context, windowSeconds int64) (*Pre
 	}
 	db, err := s.database()
 	if err != nil {
-		return nil, false, archiveFailure("read current pressure", err)
+		return nil, false, err
 	}
 	var nowEpoch int64
 	var nowMb float64
@@ -482,25 +484,39 @@ func (s *Store) PressureTendency(ctx context.Context, windowSeconds int64) (*Pre
 		return nil, false, nil // no pressure in the archive
 	}
 	if err != nil {
-		return nil, false, archiveFailure("read prior pressure", err)
+		return nil, false, archiveFailure("read current pressure", err)
 	}
 
+	minSpan := (windowSeconds + 1) / 2
+	if nowEpoch < minSpan {
+		return nil, false, nil // no nonnegative epoch can be far enough away
+	}
+	target := nowEpoch - windowSeconds
+	lastEligible := nowEpoch - minSpan
 	var pastEpoch int64
 	var pastMb float64
-	err = db.QueryRowContext(ctx, qryPressureAt, nowEpoch-windowSeconds).Scan(&pastEpoch, &pastMb)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, false, nil
+	err = db.QueryRowContext(ctx, qryPressureAt, target).Scan(&pastEpoch, &pastMb)
+	havePast := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, archiveFailure("read prior pressure", err)
 	}
-	if err != nil {
-		return nil, false, err
+	// Two index probes find the closest candidates without sorting the archive
+	// by distance. The successor upper bound excludes the current reading and
+	// short spans even for one-second or odd-length windows.
+	var nextEpoch int64
+	var nextMb float64
+	err = db.QueryRowContext(ctx, qryPressureAfter, target, lastEligible).Scan(&nextEpoch, &nextMb)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, archiveFailure("read subsequent pressure", err)
 	}
-	span := nowEpoch - pastEpoch
-	if span < windowSeconds/2 {
-		// The older sample is too recent (a short archive, or a long gap right
-		// before now): not enough separation to call a trend.
+	if err == nil && (!havePast || nextEpoch-target < target-pastEpoch) {
+		pastEpoch, pastMb, havePast = nextEpoch, nextMb, true
+	}
+	if !havePast {
 		return nil, false, nil
 	}
 
+	span := nowEpoch - pastEpoch
 	changeMb := nowMb - pastMb
 	hours := float64(span) / 3600
 	pt := &PressureTrend{

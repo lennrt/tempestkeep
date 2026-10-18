@@ -294,9 +294,14 @@ func (s *Store) TemperatureSpells(ctx context.Context, p TempSpellParams, startE
 // RainStats summarizes rainfall over a date range, in US display units, plus the
 // longest dry and wet spells. A "rainy day" clears the 0.01 in threshold; a
 // spell is a run of consecutive observed calendar days, and a missing day (a
-// coverage gap) or a day without rain readings breaks the run.
+// coverage gap) or a day without rain readings breaks the run. TotalIn is nil
+// when RainReadings is zero, and otherwise sums the available readings, including
+// measured zero. RainReadings below Observations indicates partial sample
+// coverage; equal counts do not establish continuous coverage of the time range.
 type RainStats struct {
-	TotalIn      float64  `json:"total_in"`
+	Observations int64    `json:"observations"`  // stored rows, regardless of rain availability
+	RainReadings int64    `json:"rain_readings"` // non-NULL rain samples, including measured zero
+	TotalIn      *float64 `json:"total_in"`
 	DaysObserved int64    `json:"days_observed"`
 	RainyDays    int64    `json:"rainy_days"`
 	WettestDay   string   `json:"wettest_day,omitempty"`
@@ -315,13 +320,15 @@ type RainStats struct {
 // the wettest day, and the longest dry and wet spells. Spells run over
 // consecutive calendar days with rain readings; a gap or a day without rain
 // readings ends the current spell. DaysObserved counts days with any observation.
+// Observations and RainReadings count samples in the same inclusive range;
+// missing rain samples contribute neither a reading nor an assumed amount.
 func (s *Store) RainStats(ctx context.Context, startEpoch, endEpoch int64) (RainStats, error) {
 	days, err := s.dayAggregates(ctx, startEpoch, endEpoch)
 	if err != nil {
 		return RainStats{}, err
 	}
 	var rs RainStats
-	var bestWetMm float64
+	var totalIn, bestWetMm float64
 	var dryLen, wetLen int64
 	var prev time.Time
 	havePrev := false
@@ -329,7 +336,9 @@ func (s *Store) RainStats(ctx context.Context, startEpoch, endEpoch int64) (Rain
 	fmtDay := func(t time.Time) string { return t.Format("2006-01-02") }
 	for _, d := range days {
 		rs.DaysObserved++
-		rs.TotalIn += model.MmToInch(d.rainMm)
+		rs.Observations += d.obs
+		rs.RainReadings += d.rainN
+		totalIn += model.MmToInch(d.rainMm)
 		if d.rainMm > bestWetMm {
 			bestWetMm = d.rainMm
 			rs.WettestDay = fmtDay(d.day)
@@ -363,6 +372,9 @@ func (s *Store) RainStats(ctx context.Context, startEpoch, endEpoch int64) (Rain
 			rs.WetSpellStart = fmtDay(d.day.AddDate(0, 0, int(-(wetLen - 1))))
 		}
 		prev, havePrev = d.day, true
+	}
+	if rs.RainReadings > 0 {
+		rs.TotalIn = &totalIn
 	}
 	if bestWetMm > 0 {
 		in := model.MmToInch(bestWetMm)

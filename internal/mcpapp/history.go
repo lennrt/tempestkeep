@@ -399,7 +399,7 @@ func registerCalendarTools(srv *mcp.Server, st *store.Store) {
 	addAppTool(srv, &mcp.Tool{
 		Name:        "get_observations",
 		Title:       "Observation series (downsampled)",
-		Description: "Return a bounded, downsampled observation series. Values use °F, inHg, mph, and inches. The default range is 24 hours. max_points defaults to 288 and cannot exceed 2000.",
+		Description: "Return a bounded, downsampled observation series. Values use °F, inHg, mph, and inches. rain_readings and lightning_readings count available event samples: zero means unknown, and a count below obs means partial coverage. The default range is 24 hours. max_points defaults to 288 and cannot exceed 2000.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args GetObservationsArgs) (*mcp.CallToolResult, GetObservationsOut, error) {
 		maxPoints, err := optionalBoundedInt(args.MaxPoints, 288, 2000, "max_points")
@@ -443,6 +443,15 @@ func registerCalendarTools(srv *mcp.Server, st *store.Store) {
 			// resolution isn't silently coarser than what it asked for.
 			out.Note = fmt.Sprintf("requested bucket_minutes was too fine for this range; widened to %d to stay under the point cap", bucket/60)
 		}
+		for _, point := range points {
+			if point.RainReadings < point.Obs || point.LightningReadings < point.Obs {
+				if out.Note != "" {
+					out.Note += "; "
+				}
+				out.Note += "incomplete rain or lightning coverage: check rain_readings and lightning_readings against obs; a zero reading count means the total is unknown"
+				break
+			}
+		}
 		return nil, out, nil
 	})
 
@@ -466,7 +475,7 @@ func registerCalendarTools(srv *mcp.Server, st *store.Store) {
 	addAppTool(srv, &mcp.Tool{
 		Name:        "rain_stats",
 		Title:       "Rainfall statistics",
-		Description: "Return rain totals, rainy days, the wettest day, and the longest dry and wet spells. Coverage gaps end a spell. The default range is the full archive.",
+		Description: "Return recorded rain totals, rainy days, the wettest day, and observed dry and wet spells. total_in is null without rain readings. rain_readings and observations describe sample coverage; partial totals include only reported readings. Gaps and days without rain readings end spells. The default range is the full archive.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args RainStatsArgs) (*mcp.CallToolResult, RainStatsOut, error) {
 		start, end, err := resolveOptionalRange(args.Start, args.End, 0)
@@ -481,8 +490,13 @@ func registerCalendarTools(srv *mcp.Server, st *store.Store) {
 		if start > 0 {
 			out.From = localDate(start)
 		}
-		if rs.DaysObserved == 0 {
+		switch {
+		case rs.Observations == 0:
 			out.Note = "no observations in this range"
+		case rs.RainReadings == 0:
+			out.Note = "no rain readings in this range; rainfall is unknown, not measured zero"
+		case rs.RainReadings < rs.Observations:
+			out.Note = "partial rain coverage: total and observed spells use reported readings only; sample counts do not establish continuous coverage"
 		}
 		return nil, out, nil
 	})
@@ -492,7 +506,7 @@ func registerClimateTools(srv *mcp.Server, st *store.Store) {
 	addAppTool(srv, &mcp.Tool{
 		Name:        "pressure_trend",
 		Title:       "Barometric tendency",
-		Description: "Return the change in station pressure over a trailing window. The default is 3 hours. The accepted range is 1 second through 24 hours.",
+		Description: "Compare the latest station pressure with the nearest eligible earlier reading to the window start. Samples must be at least half the window apart. Return the actual span, change, and normalized three-hour rate. The default is 3 hours; the accepted range is 1 second through 24 hours.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args PressureTrendArgs) (*mcp.CallToolResult, PressureTrendOut, error) {
 		windowHours := args.WindowHours
@@ -798,7 +812,7 @@ func registerTrendAndQueryTools(srv *mcp.Server, st *store.Store) {
 	addAppTool(srv, &mcp.Tool{
 		Name:        "temperature_trend",
 		Title:       "Warming / cooling trend",
-		Description: "Fit a temperature trend from monthly anomalies across the full archive. Results include °F per decade, R², and the largest anomalies. A short archive returns no slope.",
+		Description: "Fit a common temperature trend with separate calendar-month baselines and equal weight per monthly mean. Results include °F per decade, within-month R², and the largest anomalies. A slope needs a repeated calendar month. Flat repeated readings return zero slope without R².",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ NoArgs) (*mcp.CallToolResult, TemperatureTrendOut, error) {
 		tt, err := st.TemperatureTrend(ctx)

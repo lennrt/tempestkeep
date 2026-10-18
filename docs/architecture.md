@@ -44,6 +44,12 @@ rejects an explicit different observation type, mismatched device ID, failed API
 status, or observation outside the requested range. Missing optional identity
 fields remain compatible with older responses.
 
+MCP resolves its configured Tempest device lazily from accessible stations. The
+positive `--device-id` flag overrides `TEMPEST_DEVICE_ID`; empty or zero
+environment values retain automatic selection. Only successful resolution is
+cached. The exact device controls collection, while its parent station controls
+default live reads. Explicit station arguments do not replace that default.
+
 The model validates array width, epoch, numeric fields, and physical bounds.
 It copies retained pointer values. One malformed row rejects the complete
 response. The client does not cache rejected JSON or observation responses.
@@ -60,10 +66,28 @@ sync starts after the stored watermark. During bounded MCP catch-up, private
 metadata also preserves successful empty windows across calls and restarts.
 After catch-up completes, the next sync rechecks the tail after the watermark.
 
+Explicit CLI range collection replays inclusive local dates through the same
+collector. It leaves seed and MCP sync metadata unchanged. MCP explicit
+backfill accepts an exclusive `before_epoch`, so clients can continue directly
+from `next_before` even when a work budget stops inside a local date. Explicit
+MCP bounds also leave shared continuation metadata unchanged.
+
 MCP work budgets limit each backward call's requested history. Empty-history
 progress survives bounded calls and restarts. One MCP server serializes its
 archive write workflows. Separate server processes do not share that
 coordination, so avoid overlapping collectors for one archive.
+
+Exports use read-only streaming iterators. `EachObs` keeps the presentation
+subset; `EachArchiveObs` adds nullable stored intervals, device identity,
+precipitation type, and source. The CLI includes those fields only with
+`--metadata`. It discovers optional columns through a fixed allowlist, treats
+absent legacy columns as missing, and bounds source text before loading it.
+No file-wide result buffer or archive migration is needed.
+
+Pressure tendency probes the indexed predecessor and successor around the
+requested window start. It chooses the nearest eligible reading, with an older
+tie winner and at least half a window between samples. The rate uses the actual
+sample span. It does not sort the full archive by distance from the target.
 
 ## SQLite ownership
 
@@ -114,6 +138,11 @@ Calendar queries use the process timezone. On Unix-like systems, set `TZ`
 before startup when the station and host use different timezones. Native
 Windows uses the host timezone. Queries do not infer timezone from the archive.
 See the [query guide](querying.md) for date bounds and missing readings.
+
+Observation-series rain and lightning totals retain numeric zero for no
+samples. Separate `rain_readings` and `lightning_readings` counts distinguish
+unknown totals, measured zeros, and partial sensor coverage. The app uses these
+counts in derived display rows; the original tool result remains unchanged.
 
 ## MCP capabilities
 

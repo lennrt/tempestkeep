@@ -36,7 +36,7 @@ credentials described below.
 
 | Explore | In the app |
 |---|---|
-| Weather over time | Switch chart metrics, explore the wind rose, and inspect exact readings in the table. |
+| Weather over time | Switch metrics, inspect chart points with pointer, touch, or keyboard, and explore the wind rose. |
 | Archive and SQL results | Search rows, sort columns, and move between table pages. |
 | Updated results | Refresh the same read-only tool with its original arguments. |
 | Your working environment | Use responsive views that follow the host's light or dark theme. |
@@ -49,6 +49,8 @@ Search and pagination cover the returned rows. Views display up to 2,000 rows
 and 64 columns, with a notice when a limit applies. If a server limit truncates
 the result, narrow the tool request before drawing conclusions about the archive.
 Missing readings remain distinct from zero. The app does not run archive writes.
+Observation-series views show when rain or lightning readings are missing or
+partial. Available totals do not imply complete sensor coverage.
 
 MCP Apps support depends on the host and its version. Clients without the
 extension retain the existing text and structured tool results. See the
@@ -147,7 +149,9 @@ For an existing archive without live access, omit `TEMPEST_TOKEN` and add
 environment or loaded from `.env`. The server reads `.env` from its working
 directory, which can differ from your terminal's directory.
 
-If the token can access several devices, read the
+If the token can access several devices, use `list_stations` or
+`tempestkeep list-devices` to find the intended device. Set `TEMPEST_DEVICE_ID`
+or add `--device-id` with that ID to the MCP arguments. See the
 [device selection rules](docs/mcp.md#capabilities) before collecting.
 
 The host launches `tempestkeep mcp` and exchanges JSON-RPC over stdin/stdout.
@@ -203,6 +207,17 @@ the interactive setup wizard, then collect history and open the dashboard:
 ./bin/tempestkeep explore
 ```
 
+To fill a gap in an existing archive, collect an explicit range:
+
+```sh
+./bin/tempestkeep collect --start 2025-06-01 --end 2025-06-03
+```
+
+Both local dates are included. A range can cover at most 366 calendar days.
+Repeating it is safe and leaves ordinary collection progress unchanged.
+MCP clients can use `backfill_archive` and pass its exact `next_before` value
+as `before_epoch` to continue a bounded request; repeat `start` and `max_days`.
+
 For manual setup on Unix-like systems, copy `.env.example` to `.env` and run
 `chmod 600 .env` before entering the token. Commands read that file from their
 current working directory. Use the [CLI guide](cmd/tempestkeep/README.md) for
@@ -239,9 +254,9 @@ cycles the month/year metric. The `g` or Home key returns to the latest period.
 The `q`, Esc, and Ctrl+C keys exit either dashboard.
 
 `tempestkeep version` reports the build's injected version, then Go's module
-version when available. If neither exists, it falls back to `v0.3.0-dev`.
+version when available. If neither exists, it falls back to `v0.4.0-dev`.
 `make build` injects a version from Git tags or that development fallback.
-Version 0.3.0 is the proposed next minor release. See [CHANGELOG.md](CHANGELOG.md)
+Version 0.4.0 is the proposed next minor release. See [CHANGELOG.md](CHANGELOG.md)
 for its scope. This change does not publish a release.
 
 ## Archive behavior
@@ -382,7 +397,7 @@ Tempest names and marks belong to their respective owners. See [NOTICE.md](NOTIC
 
 TempestKeep uses the MIT License. See [LICENSE](LICENSE).
 
-[version-badge]: https://img.shields.io/badge/development-v0.3.0--dev-blue
+[version-badge]: https://img.shields.io/badge/development-v0.4.0--dev-blue
 [ci-b]: https://img.shields.io/github/actions/workflow/status/lennrt/tempestkeep/ci.yml?branch=main
 [ci]: https://github.com/lennrt/tempestkeep/actions/workflows/ci.yml
 [license-badge]: https://img.shields.io/github/license/lennrt/tempestkeep

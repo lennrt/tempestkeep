@@ -210,6 +210,8 @@ func writeStats(w io.Writer, r statsReport) error {
 		dir := "warming"
 		if *r.trend.SlopePerDecadeF < 0 {
 			dir = "cooling"
+		} else if *r.trend.SlopePerDecadeF == 0 {
+			dir = "flat"
 		}
 		r2 := ""
 		if r.trend.RSquared != nil {
@@ -228,9 +230,17 @@ func writeStats(w io.Writer, r statsReport) error {
 	}
 
 	out.println("\nRain")
-	out.printf("  Total: %.2f in over %d days, %d rainy\n", r.rain.TotalIn, r.rain.DaysObserved, r.rain.RainyDays)
-	if r.rain.LongestDrySpellDays > 0 {
-		out.printf("  Longest dry spell: %d days (%s to %s)\n", r.rain.LongestDrySpellDays, r.rain.DrySpellStart, r.rain.DrySpellEnd)
+	if r.rain.TotalIn == nil {
+		out.println("  No rain readings in the selected date range; rainfall is unavailable.")
+	} else {
+		out.printf("  Total: %.2f in over %d observed days, %d observed rainy\n", *r.rain.TotalIn, r.rain.DaysObserved, r.rain.RainyDays)
+		if r.rain.LongestDrySpellDays > 0 {
+			out.printf("  Longest observed dry spell: %d days (%s to %s)\n", r.rain.LongestDrySpellDays, r.rain.DrySpellStart, r.rain.DrySpellEnd)
+		}
+	}
+	out.printf("  Rain readings: %d of %d stored observations; counts describe samples, not continuous coverage.\n", r.rain.RainReadings, r.rain.Observations)
+	if r.rain.RainReadings > 0 && r.rain.RainReadings < r.rain.Observations {
+		out.println("  Partial rain coverage: total and spells use reported readings only; missing rain is not treated as zero.")
 	}
 
 	out.println("\nWind")

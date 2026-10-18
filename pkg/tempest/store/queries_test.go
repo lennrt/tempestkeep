@@ -59,6 +59,8 @@ func TestEmbeddedQueriesCompile(t *testing.T) {
 			q = qryRange // rendered with obsColumns at init
 		case "epoch_of.sql":
 			q = epochOfSQL("air_temp_c") // any real obs_st column
+		case "archive_range.sql":
+			q = execTemplate(archiveRangeTmpl, missingArchiveProjection())
 		default:
 			q = mustQuery(name)
 		}

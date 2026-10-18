@@ -1,9 +1,82 @@
 # Documentation
 
-Start with the [repository README](../README.md). It covers requirements,
-building, setup, collection, MCP operation, privacy, and verification.
+TempestKeep brings live weather, forecasts, and your local observation history
+into an MCP client or terminal. Start with the
+[setup and connection guide](../README.md#connect-your-agent),
+then choose a workflow below. One Go executable includes the MCP server,
+interactive app, terminal dashboards, reports, and exports.
 
-## Use TempestKeep
+## Work with several stations
+
+If your token can access multiple stations, choose which Tempest device supplies
+your archive and default live station:
+
+1. Run `tempestkeep list-devices` or ask your agent to call `list_stations`.
+   In a supporting MCP Apps host, open the **Devices** table and search by ID,
+   serial number, or station name. Each device keeps its parent station beside it.
+2. Set `TEMPEST_DEVICE_ID` or start MCP with `--device-id` to select that device.
+   The flag overrides the environment. Without a selection, TempestKeep chooses
+   the first accessible Tempest device.
+3. Keep **one device per archive**. Give each device its own archive path when
+   collecting from several stations; TempestKeep rejects writes for another device.
+
+The selected device controls collection and the default station for live reads.
+Conditions and forecasts remain station-level results. Pass `station_id` to
+`forecast` or `station_details` to read another station without changing that
+default or the archive. See [device selection and capabilities](mcp.md#capabilities),
+[MCP configuration](mcp.md#build-and-connect), and the
+[searchable device view](mcp-apps.md#read-charts-and-tables).
+
+## Explore weather in your conversation
+
+In a host that supports MCP Apps, ask for a forecast, daily summary, wind rose,
+or archive query, then open its interactive view.
+
+| Try this | What you can do |
+|---|---|
+| Inspect a dense weather chart | Point, tap, or use the keyboard slider to inspect every displayed reading, up to 2,000 points, with its time and units. |
+| Find a particular day or device | Search returned rows, sort columns, and move through table pages. |
+| Refresh while exploring | Keep the selected table, search, sort, and valid page when the refreshed columns remain compatible. |
+| Check incomplete observations | Inspect rain or lightning coverage in observation series, and distinguish missing rain, measured zero, and partial totals in rainfall summaries. |
+
+Refresh repeats a read-only tool; it does not collect new archive history.
+Search covers received rows, and display limits are shown. Clients without app
+support still receive ordinary MCP results. The [MCP Apps guide](mcp-apps.md)
+explains controls, limits, and host support.
+
+## Repair and reuse an archive
+
+- **Fill a historical gap.** Use `collect --start YYYY-MM-DD --end YYYY-MM-DD`
+  for an inclusive range of up to 366 local calendar days. Repeat an interrupted
+  command safely: committed observations remain and duplicates are ignored.
+  See [collection and backups](../cmd/tempestkeep/README.md#collection).
+- **Continue a bounded MCP backfill.** Inspect `archive_status`, then use
+  `backfill_archive`. When more history remains, explicit windows return
+  `next_before` for exact continuation without changing the shared collection cursor. Follow the
+  [archive-building workflow](mcp.md#build-an-archive).
+- **Export enough context for your own analysis.** Add `export --metadata` to CSV
+  or JSON Lines exports for stored device identity, report and wind intervals,
+  precipitation type, and source. Report intervals let you reproduce the solar
+  energy estimate. See the
+  [export guide](../cmd/tempestkeep/README.md#export-observations).
+
+## Ask questions about your weather history
+
+Compare months, find recorded extremes, revisit a date across years, inspect
+wind direction, or examine pressure changes. Start with the
+[tool-to-question guide](querying.md#choose-a-query) and
+[worked queries](querying.md#worked-tool-calls). For a terminal report, use
+[`tempestkeep stats`](../cmd/tempestkeep/README.md#archive-reports); for a custom
+archive question, use read-only `query_sql`. Coverage and missing sensor readings
+remain part of interpreting any result.
+
+An existing archive supports reports, exports, and history queries without a
+token or live API connection. MCP `--read-only` removes collection tools while
+keeping available reads; a configured token can still enable live weather.
+See [offline startup and capabilities](mcp.md#start-and-stop) and
+[dates, units, and aggregation](querying.md).
+
+## User guides
 
 - [`tempestkeep` command guide](../cmd/tempestkeep/README.md): setup, collection,
   displays, exports, and configuration precedence.
@@ -39,6 +112,19 @@ building, setup, collection, MCP operation, privacy, and verification.
 
 - [Go patch toolchain ADR](adr/0007-go-patch-toolchain.md): the Go 1.27.2 pin and
   qualification of the updated toolchain.
+
+- [Archive recovery and coverage ADR](adr/0008-archive-recovery-and-coverage.md):
+  explicit collection ranges, exact MCP continuation, and event sensor counts.
+
+- [Seasonal trend ADR](adr/0009-seasonal-trend-estimation.md): a common trend
+  with separate calendar-month baselines and explicit limits on interpretation.
+
+- [Export metadata and version ADR](adr/0010-export-metadata-and-development-version.md):
+  opt-in observation metadata, streaming access, and the 0.4.0 development target.
+- [Device selection and pressure ADR](adr/0011-mcp-device-selection-and-pressure-samples.md):
+  MCP device choice, station-device tables, pressure samples, and report bounds.
+- [Rain summary coverage ADR](adr/0012-rain-summary-coverage.md): nullable totals,
+  sample counts, and missing/partial rain in reports and interactive views.
 
 ## Review correctness and security
 

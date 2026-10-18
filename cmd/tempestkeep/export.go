@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -90,11 +91,13 @@ func cmdExport(args []string) (err error) {
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	describe(fs, "tempestkeep export: stream a date range of observations to stdout as CSV or\nJSON Lines, in SI or US units.",
 		"tempestkeep export > archive.csv",
+		"tempestkeep export --metadata --format jsonl > archive-with-intervals.jsonl",
 		"tempestkeep export --start 2024-06-01 --end 2024-06-30 --units us > june.csv",
 		"tempestkeep export --format jsonl | jq .air_temp_c")
 	db := fs.String("db", "", "path to the tempest.sqlite archive (or env TEMPEST_DB)")
 	format := fs.String("format", "csv", "output format: csv or jsonl")
 	units := fs.String("units", "si", "unit system: si (stored values) or us (display units)")
+	metadata := fs.Bool("metadata", false, "append stored device, report/wind intervals, precipitation type, and source metadata")
 	start := fs.String("start", "", "start date YYYY-MM-DD in local time (default: whole archive)")
 	end := fs.String("end", "", "end date YYYY-MM-DD in local time, inclusive (default: now)")
 	if err := parseFlags(fs, args); err != nil {
@@ -136,9 +139,9 @@ func cmdExport(args []string) (err error) {
 	defer func() { err = errors.Join(err, out.Flush()) }()
 
 	if *format == "csv" {
-		return exportCSV(ctx, st, out, startEpoch, endEpoch, us)
+		return exportCSV(ctx, st, out, startEpoch, endEpoch, us, *metadata)
 	}
-	return exportJSONL(ctx, st, out, startEpoch, endEpoch, us)
+	return exportJSONL(ctx, st, out, startEpoch, endEpoch, us, *metadata)
 }
 
 // exportRange resolves optional local start/end dates to an inclusive epoch
@@ -163,20 +166,31 @@ func exportRange(start, end string) (int64, int64, error) {
 	if startEpoch > endEpoch {
 		return 0, 0, fmt.Errorf("--start must not be after --end")
 	}
+	if startEpoch < 0 || endEpoch < 0 || startEpoch > model.MaxEpochSeconds || endEpoch > model.MaxEpochSeconds {
+		return 0, 0, fmt.Errorf("--start and --end must resolve within supported observation timestamps")
+	}
+	if endEpoch-startEpoch > store.MaxRangeSeconds {
+		return 0, 0, fmt.Errorf("--start and --end must not span more than %d days", store.MaxRangeSeconds/(24*60*60))
+	}
 	return startEpoch, endEpoch, nil
 }
 
-func exportCSV(ctx context.Context, st *store.Store, out *bufio.Writer, start, end int64, us bool) error {
+func exportCSV(ctx context.Context, st *store.Store, out *bufio.Writer, start, end int64, us, metadata bool) error {
 	w := csv.NewWriter(out)
 	// Header: epoch + local time, then the sensor columns in field order.
 	header := []string{"epoch", "time"}
 	for _, f := range obsFields(model.Obs{}, us) {
 		header = append(header, f.Name)
 	}
+	if metadata {
+		for _, f := range archiveFields(store.ArchiveObs{}) {
+			header = append(header, f.name)
+		}
+	}
 	if err := w.Write(header); err != nil {
 		return err
 	}
-	err := st.EachObs(ctx, start, end, func(o model.Obs) error {
+	err := eachExportObs(ctx, st, start, end, metadata, func(o model.Obs, archive *store.ArchiveObs) error {
 		rec := make([]string, 0, len(header))
 		rec = append(rec, strconv.FormatInt(o.Epoch, 10),
 			time.Unix(o.Epoch, 0).Local().Format(time.RFC3339))
@@ -185,6 +199,11 @@ func exportCSV(ctx context.Context, st *store.Store, out *bufio.Writer, start, e
 				rec = append(rec, "")
 			} else {
 				rec = append(rec, fmtNum(*f.Val, us))
+			}
+		}
+		if archive != nil {
+			for _, f := range archiveFields(*archive) {
+				rec = append(rec, f.value)
 			}
 		}
 		return w.Write(rec)
@@ -196,8 +215,8 @@ func exportCSV(ctx context.Context, st *store.Store, out *bufio.Writer, start, e
 	return w.Error()
 }
 
-func exportJSONL(ctx context.Context, st *store.Store, out *bufio.Writer, start, end int64, us bool) error {
-	return st.EachObs(ctx, start, end, func(o model.Obs) error {
+func exportJSONL(ctx context.Context, st *store.Store, out *bufio.Writer, start, end int64, us, metadata bool) error {
+	return eachExportObs(ctx, st, start, end, metadata, func(o model.Obs, archive *store.ArchiveObs) error {
 		var b strings.Builder
 		b.WriteByte('{')
 		fmt.Fprintf(&b, `"epoch":%d,"time":%q`, o.Epoch,
@@ -210,8 +229,60 @@ func exportJSONL(ctx context.Context, st *store.Store, out *bufio.Writer, start,
 				b.WriteString(fmtNum(*f.Val, us))
 			}
 		}
+		if archive != nil {
+			for _, f := range archiveFields(*archive) {
+				if !f.present {
+					continue
+				}
+				fmt.Fprintf(&b, ",%q:", f.name)
+				if f.name == "source" {
+					encoded, err := json.Marshal(f.value)
+					if err != nil {
+						return err
+					}
+					b.Write(encoded)
+				} else {
+					b.WriteString(f.value)
+				}
+			}
+		}
 		b.WriteString("}\n")
 		_, err := out.WriteString(b.String())
 		return err
 	})
+}
+
+// The default path retains its original reader and shape, including support for
+// older archives. Only an explicit metadata request uses the richer iterator.
+func eachExportObs(ctx context.Context, st *store.Store, start, end int64, metadata bool, fn func(model.Obs, *store.ArchiveObs) error) error {
+	if metadata {
+		return st.EachArchiveObs(ctx, start, end, func(o store.ArchiveObs) error {
+			return fn(o.Obs, &o)
+		})
+	}
+	return st.EachObs(ctx, start, end, func(o model.Obs) error { return fn(o, nil) })
+}
+
+type archiveField struct {
+	name, value string
+	present     bool
+}
+
+func archiveFields(o store.ArchiveObs) []archiveField {
+	fields := []archiveField{
+		{name: "device_id"}, {name: "report_interval_min"}, {name: "wind_interval_s"},
+		{name: "precip_type"}, {name: "source"},
+	}
+	if o.DeviceID != nil {
+		fields[0].value, fields[0].present = strconv.FormatInt(*o.DeviceID, 10), true
+	}
+	for i, value := range []*float64{o.ReportIntervalMin, o.WindIntervalSeconds, o.PrecipType} {
+		if value != nil {
+			fields[i+1].value, fields[i+1].present = fmtNum(*value, false), true
+		}
+	}
+	if o.Source != nil {
+		fields[4].value, fields[4].present = *o.Source, true
+	}
+	return fields
 }

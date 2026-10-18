@@ -7,12 +7,12 @@ export function svg(tag, attributes = {}, value) {
   if (value !== undefined) node.textContent = String(value);
   return node;
 }
-export function seriesChart(rows, key, bucketMinutes = 0) {
+export function seriesChart(rows, key, bucketMinutes = 0, selectedIndex = 0) {
   const viewport = document.documentElement.clientWidth;
   const mobile = viewport <= 480;
   const width = Math.max(240, Math.min(1000, viewport - (mobile ? 38 : viewport <= 740 ? 62 : 114)));
   const height = mobile ? 180 : 220;
-  const chart = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": `${label(key)} chart; exact readings in the table below`, class: "chart", preserveAspectRatio: "none" });
+  const chart = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": `${label(key)} chart; select a reading with the slider below`, class: "chart", preserveAspectRatio: "none" });
   const values = rows.map(row => row[key]).filter(number);
   if (!values.length) return chart;
   let low = Math.min(...values), high = Math.max(...values);
@@ -78,7 +78,67 @@ export function seriesChart(rows, key, bucketMinutes = 0) {
   const ticks = [...new Set(Array.from({ length: tickCount }, (_, i) => Math.round(i * (rows.length - 1) / Math.max(1, tickCount - 1))))];
   const spansDates = typeof rows[0]?.time === "string" && rows[0].time.slice(0, 10) !== rows.at(-1)?.time?.slice(0, 10);
   ticks.forEach((i, n) => chart.append(svg("text", { x: x(i), y: height - 13, "text-anchor": n === 0 ? "start" : n === ticks.length - 1 ? "end" : "middle" }, spansDates && typeof rows[i].time === "string" ? `${rows[i].time.slice(5, 10)} ${dateLabel(rows[i])}` : dateLabel(rows[i]))));
-  return chart;
+  const view = document.createElement("div");
+  view.className = "series-view";
+  const inspector = document.createElement("div");
+  inspector.className = "chart-inspector";
+  const control = document.createElement("label");
+  control.htmlFor = "chart-reading";
+  control.textContent = "Inspect a reading";
+  const position = document.createElement("span");
+  position.className = "reading-position";
+  control.append(position);
+  const range = document.createElement("input");
+  range.type = "range"; range.id = "chart-reading";
+  range.min = "0"; range.max = String(rows.length - 1); range.step = "1";
+  range.setAttribute("aria-describedby", "chart-reading-help");
+  const reading = document.createElement("div");
+  reading.className = "chart-reading";
+  const timestamp = document.createElement("div"), value = document.createElement("div");
+  timestamp.className = "reading-time"; value.className = "reading-value";
+  reading.append(timestamp, value);
+  const help = document.createElement("p");
+  help.id = "chart-reading-help";
+  help.textContent = "Point or tap on the chart, or use the slider. Arrow keys move one reading; Home and End jump to the first and last.";
+  inspector.append(control, range, reading, help);
+
+  const cursor = svg("line", { y1: top, y2: bottom, class: "chart-cursor" });
+  const marker = svg("circle", { r: 4.5, class: "chart-selection" });
+  const target = svg("rect", { x: left, y: top, width: right - left, height: bottom - top, fill: "transparent", class: "chart-hit" });
+  chart.append(cursor, marker, target);
+  const positions = rows.map((_, index) => x(index));
+  const metric = `${label(key)}${unit(key) ? ` (${unit(key)})` : ""}`;
+  const select = index => {
+    range.value = String(index);
+    const row = rows[index];
+    position.textContent = `${index + 1} of ${rows.length.toLocaleString("en-US")}`;
+    timestamp.textContent = row.time ? timeLabel(row.time) : dateLabel(row);
+    value.textContent = `${metric}: ${number(row[key]) ? formatted(row[key], key) : "Missing reading"}`;
+    range.setAttribute("aria-valuetext", `Reading ${position.textContent}. ${timestamp.textContent}. ${value.textContent}`);
+    cursor.setAttribute("x1", positions[index]); cursor.setAttribute("x2", positions[index]);
+    marker.setAttribute("cx", positions[index]);
+    marker.setAttribute("visibility", number(row[key]) ? "visible" : "hidden");
+    if (number(row[key])) marker.setAttribute("cy", y(row[key]));
+  };
+  range.addEventListener("input", () => select(Number(range.value)));
+  const point = event => {
+    const bounds = chart.getBoundingClientRect();
+    const px = (event.clientX - bounds.left) * width / bounds.width;
+    // Use plotted coordinates, including real time gaps, rather than treating
+    // unequal intervals as evenly spaced or interpolating a weather reading.
+    let nearest = 0;
+    positions.forEach((position, index) => {
+      if (Math.abs(position - px) < Math.abs(positions[nearest] - px)) nearest = index;
+    });
+    select(nearest);
+  };
+  target.addEventListener("pointerdown", point);
+  target.addEventListener("pointermove", event => {
+    if (event.pointerType === "mouse" || event.buttons > 0) point(event);
+  });
+  select(Math.max(0, Math.min(selectedIndex, rows.length - 1)));
+  view.append(chart, inspector);
+  return view;
 }
 
 export function windChart(sectors) {

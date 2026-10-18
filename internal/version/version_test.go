@@ -6,8 +6,8 @@ func TestStringDevelopmentVersion(t *testing.T) {
 	old := version
 	t.Cleanup(func() { version = old })
 	version = ""
-	if got := String(); got != "v0.3.0-dev" {
-		t.Fatalf("untagged development build = %q, want v0.3.0-dev", got)
+	if got := String(); got != "v0.4.0-dev" {
+		t.Fatalf("untagged development build = %q, want v0.4.0-dev", got)
 	}
 }
 

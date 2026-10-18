@@ -195,15 +195,17 @@ and what the trend suggests. Cite the numbers you used.`
    are absent, explain that this server has read-only archive access and that
    tempestkeep collect can populate the archive outside this session.
 2. If history is missing, call backfill_archive repeatedly until has_more is
-   false; omit end to resume the saved cursor between calls.
+   false. Omit both end and before_epoch to resume the saved cursor between calls.
    Report progress as you go (rows added, coverage so far).
    Completion uses an empty-history heuristic; older observations can exist
    beyond a long outage. Use explicit start and exclusive end dates for a known gap.
 3. If observations exist, call sync_archive to fetch newer rows. Repeat while
    has_more is true. An empty archive needs backfill_archive first.
 4. Finish with archive_status and summarize: total observations, date span,
-   freshness, and remaining gaps. An explicit end does not advance the shared
-   cursor; do not repeat the same explicit range expecting it to move backward.
+   freshness, and remaining gaps. An explicit end or before_epoch does not
+   advance the shared cursor. If an explicit call returns has_more, pass its
+   next_before as before_epoch and repeat start and max_days. Omit end on that
+   continuation. After an error, repeat the failed explicit request instead.
 
 Committed observations use INSERT OR IGNORE. Replaying a chunk does not add
 duplicate rows; repeated calls can still fetch older or newer windows.`},

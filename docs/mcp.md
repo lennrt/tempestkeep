@@ -22,6 +22,7 @@ Provide configuration in the client's private environment:
 |---|---|---|
 | `TEMPEST_TOKEN` | Empty | Enables live API operations. With a writable archive, it also enables collection. |
 | `TEMPEST_DB` | `./tempest.sqlite` if that file exists | Selects one local SQLite archive. Set an explicit path to create a new archive with live access. |
+| `TEMPEST_DEVICE_ID` | First accessible Tempest device | Positive ID of a Tempest (`ST`) device for collection and the default live station. Empty or zero selects automatically. |
 | `TEMPEST_READ_ONLY` | False | `1`, `true`, `yes`, or `on` removes archive write tools. Values are case-insensitive. |
 | `TEMPEST_CACHE_TTL` | 300 | Seconds to cache live API responses, from 0 through 86400. Zero disables caching. |
 | `TEMPEST_THROTTLE_MS` | 400 | Delay between collection requests, from 0 through 60000 milliseconds. Zero disables the delay. |
@@ -38,7 +39,8 @@ Do not pass a token as a command argument. Use the client's secret store or
 private environment. An alternate API endpoint receives the token. Use only
 synthetic tokens with plaintext HTTP test endpoints.
 
-`--db` selects an archive. `--read-only` disables archive writes. Either
+`--db` selects an archive. `--device-id` selects a positive device ID and overrides
+`TEMPEST_DEVICE_ID`. `--read-only` disables archive writes. Either
 `--read-only` or a true `TEMPEST_READ_ONLY` disables writes, so
 `--read-only=false` cannot override a true environment value. Read-only mode
 still permits live API calls when a token exists.
@@ -64,10 +66,28 @@ With all capabilities enabled, the server exposes 29 tools. Use the client's
 tool discovery to determine availability. Do not assume that every deployment
 has live access or write access.
 
-The server selects the first Tempest device found for the token. MCP does not
-use `TEMPEST_DEVICE_ID`, which applies to CLI collection. If a token can access
-multiple devices, make sure that the selected device matches the archive.
-The archive rejects writes for a different device.
+If the token can access several devices, call `list_stations` or run
+`tempestkeep list-devices` to find the intended Tempest device. Set its ID through
+`TEMPEST_DEVICE_ID` or `mcp --device-id` before collecting. The server resolves
+the selection on its first live request. An unknown device or a non-Tempest
+device fails that request without selecting another live station. Failed
+resolution can be retried, subject to the configured API cache lifetime.
+Without a selection, the server uses the first
+accessible Tempest device. The archive rejects writes for a different device.
+
+The selected device sets the default station for live conditions and forecasts,
+which remain station-level API results. It also selects the exact device for
+archive collection. An explicit tool `station_id` overrides the station for that
+read only. `list_stations` still lists every accessible station. With no token,
+a valid device setting does not change archive-only reads. Current conditions
+can still fall back to the archive and report `source: "archive"` if live access
+fails. Failed station resolution never labels an archive with another station.
+
+Malformed or negative environment IDs fail before archive or API access. Explicit
+flag IDs must be positive; a valid flag overrides an invalid environment value.
+An inaccessible positive ID is discovered lazily, so writable startup can create
+an empty archive before that first live failure. It does not bind or collect
+observations for the failed selection.
 
 `station_info` adds live station metadata only when the archive's device
 belongs to that station. Missing or mismatched identity leaves those fields
@@ -140,11 +160,12 @@ If the archive needs older history, call `backfill_archive`:
 ```
 
 After each successful call, inspect `rows_added`, `coverage`, `has_more`, and
-`next_before`. If `has_more` is true, another call without dates resumes the
-saved cursor. Stop on an error or when the client's time budget ends. A later
-session can continue from the committed progress.
+`next_before`. If `has_more` is true, another call without `end` or
+`before_epoch` resumes the saved cursor. Stop on an error or when the client's
+time budget ends. A later session can continue from the committed progress.
 
-To stop at a chosen oldest date, pass `start` and leave `end` unset:
+To stop at a chosen oldest date, pass `start` and leave `end` and `before_epoch`
+unset:
 
 ```json
 {"start": "2025-01-01", "max_days": 30}
@@ -172,17 +193,37 @@ lets the walk continue through empty ranges to that date.
 Completion does not prove that every date has complete observations. A data
 gap can remain even after the API's available history is exhausted.
 
-For a specific gap, use an explicit window shorter than the call budget:
+For a specific gap, use an explicit window:
 
 ```json
-{"start": "2025-06-01", "end": "2025-06-04", "max_days": 5}
+{"start": "2025-06-01", "end": "2025-06-04", "max_days": 1}
 ```
 
-This example includes June 1 through June 3 in the process timezone.
+The requested window includes June 1 through June 3 in the process timezone.
+Each call fetches at most one 24-hour day because `max_days` is one.
 For `backfill_archive`, `end` is exclusive local midnight. An explicit `end`
-does not update the shared resume cursor. Repeating the same window rereads
-that window and ignores duplicate rows. Split larger repairs into bounded
-windows instead of repeating an unchanged `end`.
+or `before_epoch` leaves the shared resume cursor, completion marker, and
+empty-history progress unchanged. Repeating the same window rereads that
+window and ignores duplicate rows.
+
+If `has_more` is true, pass the returned `next_before` integer as `before_epoch`
+on the next call. Omit `end` and repeat the same `start` and `max_days`.
+The epoch boundary is exclusive, so the next batch continues exactly where
+the previous one stopped. For example, when the process timezone is UTC and
+`next_before` is `1748908800`, continue with:
+
+```json
+{"start": "2025-06-01", "before_epoch": 1748908800, "max_days": 1}
+```
+
+That boundary is June 3, 2025 at 00:00 UTC. Use the integer from your own result.
+Do not convert it to a date: a budget counts 24-hour days, and its boundary
+can fall within a local calendar day during a daylight-saving transition.
+Repeat until `has_more` is false. `before_epoch` must be a positive epoch second
+within the supported observation range, and cannot be combined with `end`.
+Omitting `start` on a continuation removes the requested lower bound.
+After an error, repeat the failed explicit request; committed rows remain
+replay-safe, and explicit requests do not save a separate resume cursor.
 
 The CLI and MCP use the same archive and collection metadata. MCP collection
 does not create the CLI's post-collection backups. See the
@@ -207,6 +248,13 @@ The result reports the applied `bucket_minutes`. It includes means for wind
 and pressure, maxima for gusts and UV, and sums for rain and lightning.
 Empty time buckets are absent. See the [query guide](querying.md) for units,
 missing readings, comparison rules, and SQL examples.
+
+For a rainfall summary, call `rain_stats` with the same inclusive date arguments.
+Its `total_in` is `null` without rain readings and numeric zero for measured zero.
+`rain_readings` and `observations` describe stored sample coverage; a note marks
+missing or partial readings. Partial totals include reported measurements only.
+Counts do not establish continuous coverage of the range. The app keeps a
+rainfall headline even when the total is missing.
 
 ## Limits and failure behavior
 

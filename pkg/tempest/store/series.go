@@ -101,21 +101,26 @@ func (s *Store) WindRose(ctx context.Context, startEpoch, endEpoch int64) (_ Win
 // SeriesPoint is one time bucket of a downsampled observation series, in US
 // display units. Aggregation per field matches its physics: temperatures keep
 // avg/min/max, gust and UV keep the max, rain and lightning strikes sum.
+// RainReadings and LightningReadings count non-NULL sensor samples. A zero
+// count means its numeric total is unknown, not a measured zero. A count below
+// Obs means the total covers only part of the bucket's observations.
 type SeriesPoint struct {
-	Epoch        int64    `json:"epoch"` // bucket start, unix seconds
-	Time         string   `json:"time"`  // bucket start, local RFC3339
-	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
-	TempMinF     *float64 `json:"temp_min_f,omitempty"`
-	TempMaxF     *float64 `json:"temp_max_f,omitempty"`
-	HumidityPct  *float64 `json:"humidity_pct,omitempty"`
-	PressureInHg *float64 `json:"pressure_inhg,omitempty"`
-	WindMph      *float64 `json:"wind_mph,omitempty"`
-	GustMph      *float64 `json:"gust_mph,omitempty"`
-	RainIn       float64  `json:"rain_in"`
-	UVMax        *float64 `json:"uv_max,omitempty"`
-	SolarAvgWm2  *float64 `json:"solar_avg_wm2,omitempty"`
-	Strikes      int64    `json:"lightning_strikes"`
-	Obs          int64    `json:"obs"`
+	Epoch             int64    `json:"epoch"` // bucket start, unix seconds
+	Time              string   `json:"time"`  // bucket start, local RFC3339
+	TempAvgF          *float64 `json:"temp_avg_f,omitempty"`
+	TempMinF          *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF          *float64 `json:"temp_max_f,omitempty"`
+	HumidityPct       *float64 `json:"humidity_pct,omitempty"`
+	PressureInHg      *float64 `json:"pressure_inhg,omitempty"`
+	WindMph           *float64 `json:"wind_mph,omitempty"`
+	GustMph           *float64 `json:"gust_mph,omitempty"`
+	RainIn            float64  `json:"rain_in"`
+	RainReadings      int64    `json:"rain_readings"`
+	UVMax             *float64 `json:"uv_max,omitempty"`
+	SolarAvgWm2       *float64 `json:"solar_avg_wm2,omitempty"`
+	Strikes           int64    `json:"lightning_strikes"`
+	LightningReadings int64    `json:"lightning_readings"`
+	Obs               int64    `json:"obs"`
 }
 
 // Series returns the observations in [startEpoch, endEpoch] downsampled into
@@ -153,7 +158,7 @@ func (s *Store) Series(ctx context.Context, startEpoch, endEpoch, bucketSeconds 
 		var tavg, tmin, tmax, hum, pmb, wind, gust, uv, solar sql.NullFloat64
 		var rainMm, strikes float64
 		if err := rows.Scan(&p.Epoch, &tavg, &tmin, &tmax, &hum, &pmb, &wind, &gust,
-			&rainMm, &uv, &solar, &strikes, &p.Obs); err != nil {
+			&rainMm, &uv, &solar, &strikes, &p.Obs, &p.RainReadings, &p.LightningReadings); err != nil {
 			return nil, archiveFailure("scan observation series", err)
 		}
 		p.Time = localTime(p.Epoch)

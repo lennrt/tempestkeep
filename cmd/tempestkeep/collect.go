@@ -38,10 +38,13 @@ func cmdCollect(args []string) error {
 	describe(fs, "Build or refresh the local SQLite archive from the WeatherFlow REST API.\nAn interrupted seed resumes its saved cursor. Later runs sync newer observations.\nCtrl-C cancels the run.",
 		"tempestkeep collect",
 		"tempestkeep collect --backfill-start 2023-01-01",
+		"tempestkeep collect --start 2025-06-01 --end 2025-06-30   # repair an older gap",
 		"tempestkeep collect --quiet   # for cron; progress off, errors still print")
 	db := fs.String("db", "", "archive path (or env TEMPEST_DB; default ./tempest.sqlite)")
 	deviceID := fs.Int("device-id", 0, "Tempest device id (or env TEMPEST_DEVICE_ID; auto-discovered if unset)")
 	backfillStart := fs.String("backfill-start", "", "earliest date to backfill on a fresh archive, YYYY-MM-DD (default: walk back until history ends)")
+	start := fs.String("start", "", "first local date to repair, YYYY-MM-DD (requires --end; at most 366 calendar days)")
+	end := fs.String("end", "", "last local date to repair, YYYY-MM-DD inclusive (requires --start; no future dates)")
 	backupKeep := fs.Int("backup-keep", 7, "backup snapshots to keep in the backups directory beside the archive (0 disables, max 365)")
 	noBackup := fs.Bool("no-backup", false, "skip the post-run backup snapshot")
 	throttleMs := fs.Int("throttle-ms", 400, "pause between REST requests, milliseconds")
@@ -50,15 +53,30 @@ func cmdCollect(args []string) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
+	setFlags := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { setFlags[f.Name] = true })
+	explicitRange := setFlags["start"] || setFlags["end"]
+	var rangeStart, rangeEnd int64
+	if explicitRange {
+		if !setFlags["start"] || !setFlags["end"] {
+			return usagef("--start and --end must be supplied together")
+		}
+		if setFlags["backfill-start"] {
+			return usagef("--start and --end cannot be combined with --backfill-start")
+		}
+		var err error
+		rangeStart, rangeEnd, err = explicitCollectionRange(*start, *end, time.Now())
+		if err != nil {
+			return err
+		}
+	}
 	if err := config.LoadDotenv(ctx, ".env"); err != nil {
 		return err
 	}
 
 	// Env fallbacks for the archive-shaping knobs, so a cron job can carry its
 	// whole config in .env. An explicit flag wins; only an unset flag defers.
-	setFlags := map[string]bool{}
-	fs.Visit(func(f *flag.Flag) { setFlags[f.Name] = true })
-	if *backfillStart == "" {
+	if !explicitRange && *backfillStart == "" {
 		*backfillStart = os.Getenv("TEMPEST_BACKFILL_START")
 	}
 	if !setFlags["backup-keep"] {
@@ -172,7 +190,18 @@ func cmdCollect(args []string) error {
 	if err != nil {
 		return errors.Join(err, w.Close())
 	}
-	res, collectErr := bf.Collect(ctx, time.Now().Unix(), startEpoch)
+	var res collect.Summary
+	var collectErr error
+	if explicitRange {
+		result, err := bf.BackfillRange(ctx, rangeStart, rangeEnd, 0)
+		res = collect.Summary{Mode: "range", Fetched: result.Fetched, RowsAdded: result.RowsAdded}
+		collectErr = err
+		if collectErr == nil && !result.Done {
+			collectErr = collect.ErrOperationLimit
+		}
+	} else {
+		res, collectErr = bf.Collect(ctx, time.Now().Unix(), startEpoch)
+	}
 
 	// Restore the default interrupt behavior before cleanup and backup.
 	stop()
@@ -193,11 +222,15 @@ func cmdCollect(args []string) error {
 	closeErr := w.Close()
 
 	var operationErr error
+	retry := "re-run 'tempestkeep collect' to resume"
+	if explicitRange {
+		retry = "re-run with the same --start and --end arguments to finish the range; committed rows are replay-safe"
+	}
 	switch {
 	case errors.Is(collectErr, context.Canceled):
-		operationErr = errors.New("interrupted; progress is saved, re-run 'tempestkeep collect' to resume")
+		operationErr = fmt.Errorf("interrupted; progress is saved, %s", retry)
 	case collectErr != nil:
-		operationErr = fmt.Errorf("collection stopped early (re-run to resume): %w", collectErr)
+		operationErr = fmt.Errorf("collection stopped early (%s): %w", retry, collectErr)
 	}
 	cleanupErr := errors.Join(
 		wrapIfError("archive coverage check failed", coverageErr),
@@ -216,6 +249,33 @@ func cmdCollect(args []string) error {
 		}
 	}
 	return nil
+}
+
+// explicitCollectionRange validates local calendar bounds before configuration,
+// discovery, or archive creation. Calendar arithmetic preserves 23/25-hour days.
+// Today's end is clipped to now so collection never requests future seconds.
+func explicitCollectionRange(start, end string, now time.Time) (int64, int64, error) {
+	first, err := time.ParseInLocation(time.DateOnly, start, now.Location())
+	if err != nil || len(start) != len(time.DateOnly) {
+		return 0, 0, usagef("--start must be YYYY-MM-DD")
+	}
+	last, err := time.ParseInLocation(time.DateOnly, end, now.Location())
+	if err != nil || len(end) != len(time.DateOnly) {
+		return 0, 0, usagef("--end must be YYYY-MM-DD")
+	}
+	if first.Unix() < 0 || last.Unix() < 0 {
+		return 0, 0, usagef("--start and --end must not be before the Unix epoch")
+	}
+	if last.Before(first) {
+		return 0, 0, usagef("--start must not be after --end")
+	}
+	if last.After(now) {
+		return 0, 0, usagef("--end must not be a future date")
+	}
+	if !last.Before(first.AddDate(0, 0, 366)) {
+		return 0, 0, usagef("--start and --end may span at most 366 calendar days")
+	}
+	return max(first.Unix(), 1), min(last.AddDate(0, 0, 1).Unix()-1, now.Unix()), nil
 }
 
 func wrapIfError(message string, err error) error {

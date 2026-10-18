@@ -83,16 +83,18 @@ type SyncOut struct {
 }
 
 // BackfillArgs is the backfill_archive input. With no arguments it walks history
-// backward from where it left off, one bounded batch per call; start/end aim it
-// at a specific older window.
+// backward from where it left off, one bounded batch per call. An explicit end
+// or BeforeEpoch targets a separate window without changing the shared cursor.
 type BackfillArgs struct {
-	Start   string `json:"start,omitempty" jsonschema:"oldest date to fetch back to, YYYY-MM-DD local; the walk stops here"`
-	End     string `json:"end,omitempty" jsonschema:"exclusive end date YYYY-MM-DD local (its midnight is not fetched); omit to resume the saved cursor"`
-	MaxDays int    `json:"max_days,omitempty" jsonschema:"cap on 24-hour days of history fetched per call (default 30, max 365); batches may use fewer days to fit whole request windows"`
+	Start       string `json:"start,omitempty" jsonschema:"oldest date to fetch back to, YYYY-MM-DD local; repeat this floor on each continuation"`
+	End         string `json:"end,omitempty" jsonschema:"exclusive end date YYYY-MM-DD local (its midnight is not fetched); cannot combine with before_epoch; omit both to resume the saved cursor"`
+	BeforeEpoch *int64 `json:"before_epoch,omitempty" jsonschema:"positive exclusive epoch-second boundary; pass next_before here to continue an explicit window exactly; cannot combine with end"`
+	MaxDays     int    `json:"max_days,omitempty" jsonschema:"cap on 24-hour days of history fetched per call (default 30, max 365); batches may use fewer days to fit whole request windows"`
 }
 
-// BackfillOut is the backfill_archive output. Call again while has_more is true
-// (no arguments needed; it resumes) until the whole history is stored.
+// BackfillOut is the backfill_archive output. While HasMore is true, undated
+// calls resume shared progress; explicit windows continue with NextBefore as
+// BeforeEpoch. Repeat the same Start and MaxDays on each continuation.
 type BackfillOut struct {
 	RowsAdded    int    `json:"rows_added"`
 	Fetched      int    `json:"fetched"`
@@ -202,12 +204,21 @@ func registerArchiveTools(srv *mcp.Server, live *liveSource, writer *store.Write
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "backfill_archive",
 		Title:       "Backfill archive (download history)",
-		Description: "Append older observations in one bounded batch. A call without dates resumes the saved cursor. max_days defaults to 30 and cannot exceed 365. Call again while has_more is true.",
+		Description: "Append older observations in one bounded batch. Omit end and before_epoch to resume the saved cursor. For explicit windows, pass next_before as before_epoch and repeat start and max_days while has_more is true. max_days defaults to 30 and cannot exceed 365.",
 		Annotations: appendOnlyWrite(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args BackfillArgs) (*mcp.CallToolResult, BackfillOut, error) {
 		if args.MaxDays < 0 || args.MaxDays > maxBackfillMaxDays {
 			return nil, BackfillOut{}, fmt.Errorf("max_days must be in 0..%d", maxBackfillMaxDays)
 		}
+		if args.BeforeEpoch != nil {
+			if args.End != "" {
+				return nil, BackfillOut{}, fmt.Errorf("end and before_epoch cannot be combined")
+			}
+			if *args.BeforeEpoch <= 0 || *args.BeforeEpoch > model.MaxEpochSeconds {
+				return nil, BackfillOut{}, fmt.Errorf("before_epoch must be in 1..%d", model.MaxEpochSeconds)
+			}
+		}
+		useCursor := args.End == "" && args.BeforeEpoch == nil
 		var floor int64
 		if args.Start != "" {
 			t, err := parseLocalDate(args.Start)
@@ -221,8 +232,8 @@ func registerArchiveTools(srv *mcp.Server, live *liveSource, writer *store.Write
 			// Observations require a positive epoch. Reserve zero for the
 			// open-ended heuristic even when the requested local date is epoch zero.
 			floor = max(floor, 1)
-			if args.End == "" && floor > time.Now().Unix() {
-				return nil, BackfillOut{}, fmt.Errorf("start date must not be in the future when end is omitted")
+			if useCursor && floor > time.Now().Unix() {
+				return nil, BackfillOut{}, fmt.Errorf("start date must not be in the future when end and before_epoch are omitted")
 			}
 		}
 		if args.End != "" {
@@ -237,6 +248,9 @@ func registerArchiveTools(srv *mcp.Server, live *liveSource, writer *store.Write
 				return nil, BackfillOut{}, fmt.Errorf("start date must be before the exclusive end date")
 			}
 		}
+		if args.BeforeEpoch != nil && floor >= *args.BeforeEpoch {
+			return nil, BackfillOut{}, fmt.Errorf("start date must be before the exclusive before_epoch boundary")
+		}
 		if err := acquire(ctx); err != nil {
 			return nil, BackfillOut{}, err
 		}
@@ -250,10 +264,14 @@ func registerArchiveTools(srv *mcp.Server, live *liveSource, writer *store.Write
 		}
 
 		// Where to start walking back from, and whether to track the shared cursor.
-		useCursor := args.End == ""
-		before, err := backfillStartPoint(ctx, writer, deviceID, args.End, useCursor)
-		if err != nil {
-			return nil, BackfillOut{}, err
+		var before int64
+		if args.BeforeEpoch != nil {
+			before = *args.BeforeEpoch
+		} else {
+			before, err = backfillStartPoint(ctx, writer, deviceID, args.End, useCursor)
+			if err != nil {
+				return nil, BackfillOut{}, err
+			}
 		}
 		// A completed whole-history walk short-circuits, so re-calling is a no-op.
 		if useCursor && floor == 0 {
@@ -291,7 +309,7 @@ func registerArchiveTools(srv *mcp.Server, live *liveSource, writer *store.Write
 		}
 		err = errors.Join(err, fillCoverage(ctx, writer, deviceID, &out))
 		if err != nil {
-			return nil, out, err // partial progress is durable; the cursor lets a retry resume
+			return nil, out, err // Committed rows survive; replaying an explicit window is safe.
 		}
 		if !out.HasMore {
 			if floor > 0 {
@@ -300,7 +318,7 @@ func registerArchiveTools(srv *mcp.Server, live *liveSource, writer *store.Write
 				out.Note = "backfill stopped after 15 consecutive days without observations, or at the earliest supported timestamp; older data may exist beyond a long outage"
 			}
 		} else if !useCursor {
-			out.Note = "this explicit end date does not advance the shared cursor; continue with an earlier end date to fetch an older window"
+			out.Note = "this explicit end or before_epoch does not advance the shared cursor; pass next_before as before_epoch and repeat the same start and max_days to continue exactly"
 		}
 		return nil, out, nil
 	})

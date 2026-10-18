@@ -51,6 +51,10 @@ A daylight-saving transition can make a local day 23 or 25 hours long. Do not
 assume that every local day contains 1440 one-minute observations. Prefer the
 calendar tools to SQL that applies a fixed UTC offset across changing dates.
 
+CLI `stats` and `export` validate resolved dates before configuration and archive
+access. UTC bounds must stay within 1970-01-01 through 9999-12-31 and differ by
+at most 36,600 days. An invalid range returns usage status 2.
+
 `get_observations` uses fixed-duration buckets aligned to the Unix epoch.
 Its timestamps identify bucket starts. A large bucket does not necessarily
 start at local midnight, and the first or last bucket can contain only part
@@ -86,6 +90,28 @@ Rain and lightning increments cover each row's report interval, which can
 differ from one minute. Sum the increments without multiplying by interval
 length.
 
+`rain_stats` and the rain section of CLI `stats --format json` include
+`observations`, `rain_readings`, and `total_in`. The counts cover stored samples
+within the inclusive query bounds:
+
+| Sample coverage | Meaning of `total_in` |
+|---|---|
+| No observations | `null`: the range contains no stored samples. |
+| Observations exist, no rain readings | `null`: rainfall is unknown. |
+| Some observations lack rain | A partial sum of reported readings, including measured zero. |
+| Every stored observation has rain | The sum of those readings, including measured zero. |
+
+Equal counts do not prove continuous coverage of the time range. No missing
+samples are filled or extrapolated. `days_observed` still counts days with any
+observation. Rainy days and wet/dry spells describe reported readings; a day
+without rain readings or a calendar gap ends a spell. A numeric zero count of
+recorded rainy days does not establish dry weather when rain readings are absent.
+Daily, period, and climate-normal rainfall fields retain their existing contracts.
+
+Go callers now check `RainStats.TotalIn` for nil before dereferencing it. JSON
+and MCP consumers must accept a number or explicit `null`; the key is always
+present. See [ADR 0012](adr/0012-rain-summary-coverage.md).
+
 `solar_stats` estimates solar energy by summing each `solar_wm2` reading times
 its positive `report_interval_min`, times 60, divided by 1,000,000. The result
 is MJ/m². For example, 100 W/m² over one reported minute contributes 0.006 MJ/m².
@@ -98,6 +124,12 @@ subtract overlaps between intervals. Gaps receive no estimated energy.
 `avg_daily_insolation_mj` averages only days with a solar reading and a usable
 interval. `days_observed` counts all days with stored observations, including
 days without solar readings.
+
+To reproduce this estimate outside TempestKeep, use `export --metadata` in CSV
+or JSON Lines format. It includes each available `report_interval_min` beside
+`solar_wm2`; both stay in the same units under `--units us`. The default export
+omits report intervals. See the [export guide](../cmd/tempestkeep/README.md#export-observations)
+for missing-value rules and the optional fields.
 
 Treat insolation as an estimate from reported intervals. A station's sunlight
 measurements do not measure a solar panel's electrical output.
@@ -118,9 +150,24 @@ sample span. It is not necessarily a measured change over exactly three hours.
 The separate `pressure_trend` tool retains the historical samples' time, span,
 and actual change, along with the normalized rate.
 
+Pressure tendency uses the latest nonmissing pressure reading and the earlier
+reading closest to the requested window start. It considers samples before and
+after that target, with the older sample winning an equal-distance tie. The pair
+must span at least half the requested window, rounded up to whole seconds. A
+three-hour request can therefore use a two-hour pair, while a recent cluster
+under 90 minutes cannot establish that trend. Missing pressure readings do not
+count as samples. Inspect the returned span when the archive is sparse.
+
 `get_observations` preserves temperature means, minima, and maxima. It uses
 mean wind speed, maximum gust and UV, and total rain and lightning per bucket.
 An hourly `gust_mph` is the largest stored gust in that bucket.
+
+Each series bucket also includes `rain_readings` and `lightning_readings`.
+These count non-missing samples for each event sensor. If a count is zero,
+its numeric total is unknown even though the compatible total field is zero.
+A positive count with a zero total is a measured zero. A count below `obs`
+means the total covers only some observations. MCP Apps shows unknown totals
+as missing values and warns about incomplete coverage.
 
 ## Coverage and missing readings
 
@@ -133,7 +180,7 @@ while `COUNT(air_temp_c)` counts rows with a temperature reading. `AVG`, `MIN`,
 `MAX`, and `SUM` skip missing values. `SUM` returns `NULL` when there are no
 non-null input values.
 
-Some history totals use zero when no valid increments exist. Compare those
+Other history totals can use zero when no valid increments exist. Compare those
 totals with SQL reading counts for `rain_mm` or `strike_count`. `sensor_health`
 covers continuous sensors, not these interval counts. A returned zero alone
 does not prove that a working sensor recorded no rain or lightning.
@@ -155,9 +202,16 @@ can still contribute to a daily summary. Compare sample counts and covered
 dates before ranking days, months, or years.
 
 `climate_normals` describes the available archive. It does not establish a
-standard long-term climate baseline. `temperature_trend` fits the recorded
-series. Gaps, partial years, and changes to station placement can affect that
-fit. Report the available span and evidence before interpreting a trend.
+standard long-term climate baseline. `temperature_trend` fits one slope with a
+separate baseline for each calendar month. Each usable monthly mean has equal
+weight. The fit centers both time and temperature within that calendar month,
+so a month observed only once does not change the slope.
+
+The trend needs at least one calendar month repeated across years. Repeated
+constant temperatures produce a zero slope and no R². Otherwise R² describes
+the fit after seasonal baselines are removed. It does not measure statistical
+significance. Sparse months, gaps, and changes to station placement still limit
+interpretation. Report the available span and evidence before interpreting a trend.
 
 ## Worked tool calls
 

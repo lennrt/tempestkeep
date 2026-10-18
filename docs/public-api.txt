@@ -301,6 +301,7 @@ const (
 	MaxRangeSeconds       = int64(100 * 366 * 24 * time.Hour / time.Second)
 	MaxSeriesPoints       = 2000
 )
+const MaxArchiveSourceBytes = 1024
 VARIABLES
 var (
 	ErrInvalidArgument = errors.New("invalid argument")
@@ -312,6 +313,14 @@ var (
 	ErrArchiveIO       = errors.New("archive I/O failure")
 )
 TYPES
+type ArchiveObs struct {
+	model.Obs
+	DeviceID            *int64   `json:"device_id,omitempty"`
+	ReportIntervalMin   *float64 `json:"report_interval_min,omitempty"`
+	WindIntervalSeconds *float64 `json:"wind_interval_s,omitempty"`
+	PrecipType          *float64 `json:"precip_type,omitempty"`
+	Source              *string  `json:"source,omitempty"`
+}
 type ClimateIndexParams struct {
 	FrostMaxF         float64 // frost day: daily low below this (default 32°F / 0°C)
 	IceMaxF           float64 // ice day: daily high stays below this (default 32°F)
@@ -452,7 +461,9 @@ type QueryResult struct {
 	Truncated bool     `json:"truncated,omitempty"` // hit maxRows; more rows exist
 }
 type RainStats struct {
-	TotalIn      float64  `json:"total_in"`
+	Observations int64    `json:"observations"`  // stored rows, regardless of rain availability
+	RainReadings int64    `json:"rain_readings"` // non-NULL rain samples, including measured zero
+	TotalIn      *float64 `json:"total_in"`
 	DaysObserved int64    `json:"days_observed"`
 	RainyDays    int64    `json:"rainy_days"`
 	WettestDay   string   `json:"wettest_day,omitempty"`
@@ -496,20 +507,22 @@ type SensorStatus struct {
 	Stale       bool    `json:"stale,omitempty"`
 }
 type SeriesPoint struct {
-	Epoch        int64    `json:"epoch"` // bucket start, unix seconds
-	Time         string   `json:"time"`  // bucket start, local RFC3339
-	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
-	TempMinF     *float64 `json:"temp_min_f,omitempty"`
-	TempMaxF     *float64 `json:"temp_max_f,omitempty"`
-	HumidityPct  *float64 `json:"humidity_pct,omitempty"`
-	PressureInHg *float64 `json:"pressure_inhg,omitempty"`
-	WindMph      *float64 `json:"wind_mph,omitempty"`
-	GustMph      *float64 `json:"gust_mph,omitempty"`
-	RainIn       float64  `json:"rain_in"`
-	UVMax        *float64 `json:"uv_max,omitempty"`
-	SolarAvgWm2  *float64 `json:"solar_avg_wm2,omitempty"`
-	Strikes      int64    `json:"lightning_strikes"`
-	Obs          int64    `json:"obs"`
+	Epoch             int64    `json:"epoch"` // bucket start, unix seconds
+	Time              string   `json:"time"`  // bucket start, local RFC3339
+	TempAvgF          *float64 `json:"temp_avg_f,omitempty"`
+	TempMinF          *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF          *float64 `json:"temp_max_f,omitempty"`
+	HumidityPct       *float64 `json:"humidity_pct,omitempty"`
+	PressureInHg      *float64 `json:"pressure_inhg,omitempty"`
+	WindMph           *float64 `json:"wind_mph,omitempty"`
+	GustMph           *float64 `json:"gust_mph,omitempty"`
+	RainIn            float64  `json:"rain_in"`
+	RainReadings      int64    `json:"rain_readings"`
+	UVMax             *float64 `json:"uv_max,omitempty"`
+	SolarAvgWm2       *float64 `json:"solar_avg_wm2,omitempty"`
+	Strikes           int64    `json:"lightning_strikes"`
+	LightningReadings int64    `json:"lightning_readings"`
+	Obs               int64    `json:"obs"`
 }
 type SolarStats struct {
 	DaysObserved int64 `json:"days_observed"`
@@ -536,6 +549,7 @@ func (s *Store) ComfortStatistics(ctx context.Context, startEpoch, endEpoch int6
 func (s *Store) Coverage(ctx context.Context) (Coverage, error)
 func (s *Store) DailySummary(ctx context.Context, startEpoch, endEpoch int64) ([]DayStat, error)
 func (s *Store) DegreeDays(ctx context.Context, p DegreeDayParams, startEpoch, endEpoch int64) (DegreeDayStat, []DegreeDayStat, error)
+func (s *Store) EachArchiveObs(ctx context.Context, startEpoch, endEpoch int64, fn func(ArchiveObs) error) (err error)
 func (s *Store) EachObs(ctx context.Context, startEpoch, endEpoch int64, fn func(model.Obs) error) (err error)
 func (s *Store) Gaps(ctx context.Context, minSeconds int64, limit int) (_ []Gap, err error)
 func (s *Store) HourlyClimatology(ctx context.Context, startEpoch, endEpoch int64) (_ []HourStat, err error)
@@ -579,11 +593,10 @@ type TempTrend struct {
 	FirstMonth string `json:"first_month,omitempty"` // YYYY-MM
 	LastMonth  string `json:"last_month,omitempty"`
 	// SlopePerDecadeF is the fitted warming rate in °F per decade; positive is
-	// warming. Nil until the anomalies actually vary over time, which needs the
-	// same calendar month observed in more than one year (a single year, or years
-	// that never share a month, leave every anomaly at zero and carry no trend).
+	// warming. Nil until a calendar month has usable means in more than one year.
+	// Repeated constant temperatures identify a zero slope.
 	SlopePerDecadeF *float64 `json:"slope_per_decade_f,omitempty"`
-	RSquared        *float64 `json:"r_squared,omitempty"` // fit quality, 0..1
+	RSquared        *float64 `json:"r_squared,omitempty"` // within-month fit, 0..1; nil for zero temperature variance
 	WarmestAnomalyF *float64 `json:"warmest_anomaly_f,omitempty"`
 	WarmestMonth    string   `json:"warmest_month,omitempty"`
 	ColdestAnomalyF *float64 `json:"coldest_anomaly_f,omitempty"`

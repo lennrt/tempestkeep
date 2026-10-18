@@ -29,6 +29,7 @@ This repository does not certify a particular host or version.
 | "Show daily weather for the past month." | Trends and a table of daily summaries. |
 | "Show the windiest days in my archive." | Ranked rows from a summary or read-only SQL result. |
 | "Show the archive status." | Coverage and the available structured details. |
+| "List my stations and devices." | Stations and a Devices table with parent station names and exact IDs. |
 
 All 27 read-only tools have views when live and archive sources are available.
 Only tools supported by the current configuration appear. `backfill_archive`
@@ -36,13 +37,31 @@ and `sync_archive` retain their ordinary MCP results and have no app controls.
 
 ## Read charts and tables
 
-Charts show supported weather series with a metric selector. Hover over bars
-or line series with up to 60 readings to see values. For larger line series,
-use the table for exact readings. Wind results include a 16-sector rose.
+Charts show supported weather series with a metric selector. Point or tap on a
+chart to inspect the nearest returned reading, including its full source time,
+timezone when supplied, metric, and units. The slider selects every displayed
+point, including dense series of up to 2,000 readings. Focus the slider and use
+arrow keys for adjacent readings, or Home and End for the first and last.
+Missing readings are labeled explicitly. Selection follows the plotted spacing
+and does not interpolate across gaps or fetch data. Changing the metric or
+replacing the result resets selection to the first reading.
+Wind results include a 16-sector rose with exact frequencies in the table.
 Dataset tabs separate collections
 such as hourly and daily forecasts. Tables provide text search, numeric-aware
 column sorting, and eight-row pages. These controls operate on the received
 result. They do not run a new archive query or retrieve rows beyond a server limit.
+
+The `list_stations` view includes a Devices table with station ID, station name,
+device ID, device type, and serial number. Search an exact ID or serial number to
+find its parent station. Numeric station and device IDs use ungrouped digits so
+they can be copied into configuration. Duplicate entries and missing fields stay
+visible. The view uses only the received station result and leaves it unchanged.
+If a numeric ID exceeds the browser's exact integer range, the cell reports
+`ID exceeds browser precision` instead of presenting a rounded ID for copying.
+Use `tempestkeep list-devices` to read that ID; text IDs remain unchanged.
+It examines at most 2,000 stations and 2,000 device entries,
+with a notice when either limit omits data. Its fixed columns also let table
+controls survive a refresh that temporarily returns no devices.
 
 The view displays at most 2,000 rows and 64 columns per table. It reports when
 these display limits omit data. The original structured tool result remains
@@ -56,12 +75,37 @@ Missing readings remain distinct from measured zero. Labels and field units
 come from the tool result. Raw SQL retains SI units unless the query explicitly
 converts them. SQL column names and values remain in their original order, even
 when names repeat. The app does not infer units from arbitrary SQL column names.
+For observation series, `rain_readings` and `lightning_readings` count the samples
+that supplied each event measurement. A zero count displays the corresponding
+total as missing in charts, tables, and summaries. A positive count preserves a
+measured zero. If a count is below `obs`, the total covers only some samples.
+The view reports missing and partial buckets, and keeps their counts in the table.
+These counts describe samples, not continuous sensor uptime. Original tool
+results remain intact. Older results without counts retain their existing display.
+
+The Rainfall patterns view for `rain_stats` keeps rainfall as its headline even
+when no measurement is available. It shows missing rainfall and unavailable
+rain statistics as `—`, while measured zero stays zero. The sample-count notice
+distinguishes an empty range, absent rain readings, and a partial reported total.
+Counts describe stored samples, not continuous coverage. Refresh updates the
+total and notice together; original tool results and other views stay unchanged.
 See the [query guide](querying.md) for date boundaries, aggregation, and incomplete
 sensor coverage.
 
 Refresh repeats the current read-only tool with the same arguments through the
 host. Live tools retain the configured API cache behavior. Archive views read
 the archive's current contents. Refresh does not sync or backfill history.
+A compatible refresh keeps the selected dataset, search text, sort column and
+direction, and page. If fewer filtered rows remain, the page moves to the last
+available page. Edits made while the call is pending are retained, including
+search focus and text selection. A failed refresh leaves the prior result and
+controls available.
+
+A new tool input resets table controls. A missing selected dataset or a changed
+ordered column structure also resets them, so stale sorting cannot select a
+different column. Empty results without explicit column metadata also reset
+controls because their structure is unknown. This state lasts only in the current
+app instance. Chart reading selection still resets when a result is replaced.
 For a different range or query, ask the agent to call the tool with new arguments.
 
 The view follows the host's theme and fits narrow containers. Loading, empty

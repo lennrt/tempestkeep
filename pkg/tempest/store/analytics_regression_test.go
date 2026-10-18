@@ -140,7 +140,7 @@ func TestMissingEventReadingsBreakSpells(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rain.DaysObserved != 3 || rain.TotalIn != 0 || rain.LongestDrySpellDays != 1 {
+	if rain.DaysObserved != 3 || rain.TotalIn == nil || *rain.TotalIn != 0 || rain.LongestDrySpellDays != 1 {
 		t.Errorf("dry spell = %d, want 1 (missing rain breaks the run)", rain.LongestDrySpellDays)
 	}
 	lightning, err := s.LightningActivity(t.Context(), base, base+2*86400)
@@ -165,7 +165,7 @@ func TestMissingRainBreaksWetSpell(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.DaysObserved != 3 || got.RainyDays != 2 || got.LongestWetSpellDays != 1 || got.LongestDrySpellDays != 0 ||
-		!almost(got.TotalIn, model.MmToInch(2)) {
+		got.TotalIn == nil || !almost(*got.TotalIn, model.MmToInch(2)) {
 		t.Errorf("missing rain joined separate wet days or invented dry days: %+v", got)
 	}
 }
