@@ -17,3 +17,5 @@ Go clients must handle pointers; JSON clients must handle null. Existing archive
 remain unchanged. Partial readings produce available sums. Terminal summaries mark partial sums
 with ≥; JSON carries the exact sample counts. Counts never establish temporal completeness and
 partial months remain eligible for normals. Temperature normal denominators remain unchanged.
+The terminal day rain sparkline leaves buckets without rain readings as gaps. It preserves
+reported zero and available partial sums; the day's summary states missing or partial coverage.

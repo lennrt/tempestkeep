@@ -15,3 +15,9 @@ months and expose rain_years. Counts MUST NOT imply complete temporal coverage.
 - **WHEN** one year's month has rain readings and another has none
 - **THEN** the normal uses only the rain-contributing year and reports rain_years as one
 - **AND** partial sums remain available without claiming complete temporal coverage
+
+#### Scenario: Terminal day rain charts contain missing samples
+- **WHEN** a terminal day rain chart includes buckets without rain readings, reported zero,
+  and available partial totals
+- **THEN** buckets without rain readings remain gaps and reported zero remains plotted
+- **AND** available partial totals remain plotted with incomplete coverage shown by the day summary

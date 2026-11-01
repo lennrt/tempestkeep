@@ -72,12 +72,9 @@ func renderDayView(d dayData) string {
 			continue
 		}
 		temps[i] = p.TempAvgF
-		if p.RainIn > 0 {
+		if p.RainReadings > 0 {
 			v := p.RainIn
 			rain[i] = &v
-		} else if p.Obs > 0 {
-			zero := 0.0
-			rain[i] = &zero
 		}
 		wind[i] = p.WindMph
 		solar[i] = p.SolarAvgWm2

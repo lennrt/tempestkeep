@@ -10,3 +10,7 @@
   three new browser cases and the integrated 63-case browser suite passed.
 - [x] Independently review the integrated change. Correct the this-day rain cell
   partial marker; the original reproduction and terminal width checks passed.
+- [x] Preserve gaps in the terminal day rain sparkline without losing reported zero or
+  partial totals. The renderer regression failed against the original renderer with a Go
+  overlay, then passed with focused explorer and terminal checks and their race run on Go
+  1.27.3. Strict validation of this change passed.
