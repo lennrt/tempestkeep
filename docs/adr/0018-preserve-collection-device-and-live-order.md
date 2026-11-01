@@ -14,6 +14,10 @@ fail closed on invalid data. Legacy rows with device IDs retain that identity;
 legacy archives without a usable identity require an explicit selector. Writer
 binding remains the final ownership check, including concurrent changes.
 
+Read persisted identity through the shared bounded metadata reader. This keeps
+selection consistent with writer binding in UTF-16 archives and for legacy
+metadata tables whose names differ only in letter case.
+
 Live latest observations use the largest validated timestamp, independent of
 response order. The first row wins a timestamp tie. Validate every row before
 returning a result, so an older malformed row still rejects the response.

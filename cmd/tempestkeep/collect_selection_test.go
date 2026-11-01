@@ -212,3 +212,37 @@ func TestCollectFreshArchiveDiscovers(t *testing.T) {
 		t.Fatalf("new archive identity=%d error=%v", got, err)
 	}
 }
+
+func TestCollectionDeviceMetadataUsesSharedReader(t *testing.T) {
+	for _, tc := range []struct {
+		name, encoding, table string
+		device                int
+	}{
+		{"case-insensitive legacy metadata table", "UTF-8", "META", 456},
+		{"UTF-16le identity", "UTF-16le", "meta", int(^uint(0) >> 1)},
+		{"UTF-16be identity", "UTF-16be", "meta", int(^uint(0) >> 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "archive.sqlite")
+			db, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, schemaErr := db.ExecContext(t.Context(), fmt.Sprintf("PRAGMA encoding='%s'; CREATE TABLE %s (key TEXT PRIMARY KEY, value TEXT NOT NULL)", tc.encoding, tc.table))
+			if err := errors.Join(schemaErr, db.Close()); err != nil {
+				t.Fatal(err)
+			}
+			w, err := store.OpenWriter(t.Context(), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := errors.Join(w.BindDevice(t.Context(), tc.device), w.Close()); err != nil {
+				t.Fatal(err)
+			}
+			got, err := collectionDevice(t.Context(), 0, "", path)
+			if err != nil || got != tc.device {
+				t.Fatalf("archive device=%d want=%d error=%v", got, tc.device, err)
+			}
+		})
+	}
+}

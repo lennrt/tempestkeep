@@ -7,6 +7,8 @@ order rather than timestamps.
 ## What Changes
 
 - Reuse existing archive identity when collection has no device selector.
+- Read identity through the shared metadata reader, including UTF-16 databases
+  and case-insensitive legacy table names.
 - Reject explicit nonpositive selectors and nonempty nonpositive environment IDs.
 - Select the greatest validated station timestamp; first row wins ties.
 

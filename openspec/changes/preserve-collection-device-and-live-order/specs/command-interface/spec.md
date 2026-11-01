@@ -29,3 +29,9 @@ continue to reject explicit mismatches.
 
 - **WHEN** a positive selector identifies another device
 - **THEN** collection returns a device mismatch without changing observations
+
+#### Scenario: Legacy metadata uses a different encoding or letter case
+
+- **WHEN** an existing archive has a valid device binding in a UTF-16 database
+  or a metadata table named with different letter case
+- **THEN** collection reuses the same binding that the writer reads

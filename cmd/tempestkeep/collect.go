@@ -270,24 +270,18 @@ func existingCollectionDevice(ctx context.Context, path string) (_ int, err erro
 		return 0, err
 	}
 	defer func() { err = errors.Join(err, s.Close()) }()
-	// Bound stored metadata before loading it; legacy archives may lack meta.
-	meta, err := s.Query(ctx, "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'meta'", 1)
+	// Use the shared bounded reader, including its database-encoding handling
+	// and support for legacy archives without a metadata table.
+	raw, bound, err := s.Meta(ctx, "archive_device_id")
 	if err != nil {
 		return 0, err
 	}
-	if len(meta.Rows) != 0 {
-		binding, err := s.Query(ctx, "SELECT CASE WHEN length(CAST(value AS BLOB)) <= 32 THEN value ELSE NULL END FROM meta WHERE key = 'archive_device_id' LIMIT 1", 1)
-		if err != nil {
-			return 0, err
+	if bound {
+		device, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || device <= 0 {
+			return 0, fmt.Errorf("%w: archive has invalid device metadata", store.ErrInvalidArchive)
 		}
-		if len(binding.Rows) != 0 {
-			raw, ok := binding.Rows[0][0].(string)
-			device, parseErr := strconv.Atoi(raw)
-			if !ok || parseErr != nil || device <= 0 {
-				return 0, fmt.Errorf("%w: archive has invalid device metadata", store.ErrInvalidArchive)
-			}
-			return device, nil
-		}
+		return device, nil
 	}
 	// Store.Open already rejects mixed device IDs. Query only one value,
 	// including for old archives that predate persisted device binding.

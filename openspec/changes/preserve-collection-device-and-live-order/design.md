@@ -2,7 +2,9 @@
 
 Inspect existing archives read-only before discovery. Read persisted identity,
 otherwise use a bounded first device query after Store validates one-device
-ownership. Validate metadata as a positive integer. Missing paths discover;
+ownership. Use the shared bounded metadata reader so database encoding and
+case-insensitive metadata table names match writer binding. Validate metadata
+as a positive integer. Missing paths discover;
 other file/read errors do not fall through. Empty modern archives discover.
 Unidentifiable legacy schemas require an explicit selector. Close the reader
 before Writer opens. Writer binding still rejects mismatch and concurrent claims.
