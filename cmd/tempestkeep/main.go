@@ -133,6 +133,7 @@ var commands = map[string]func([]string) error{
 	"collect":      cmdCollect,
 	"export":       cmdExport,
 	"stats":        cmdStats,
+	"status":       cmdStatus,
 	"list-devices": cmdListDevices,
 	"mcp":          cmdMCP,
 }
@@ -360,6 +361,7 @@ Archive
   collect        build or refresh local history
   explore        browse day, week, month, year, and record views
   stats          print a climate summary (text or JSON)
+  status         inspect archive coverage, progress, and gaps offline
   export         stream observations as CSV or JSON Lines
 
 Utilities

@@ -32,7 +32,7 @@ var heatMetrics = []heatMetric{
 		func(v, _, _ float64) lipgloss.Color { return tempColor(v) }, "%.0f°"},
 	{"low °F", func(d store.DayStat) *float64 { return d.TempMinF },
 		func(v, _, _ float64) lipgloss.Color { return tempColor(v) }, "%.0f°"},
-	{"rain", func(d store.DayStat) *float64 { v := d.RainIn; return &v },
+	{"rain", func(d store.DayStat) *float64 { return d.RainIn },
 		rainColor, "%.2f in"},
 	{"gust", func(d store.DayStat) *float64 { return d.PeakGustMph },
 		gustColor, "%.0f mph"},
@@ -72,12 +72,9 @@ func renderDayView(d dayData) string {
 			continue
 		}
 		temps[i] = p.TempAvgF
-		if p.RainIn > 0 {
+		if p.RainReadings > 0 {
 			v := p.RainIn
 			rain[i] = &v
-		} else if p.Obs > 0 {
-			zero := 0.0
-			rain[i] = &zero
 		}
 		wind[i] = p.WindMph
 		solar[i] = p.SolarAvgWm2
@@ -141,7 +138,7 @@ func (d dayData) statLine() string {
 		valF(s.TempMaxF, "hi %.0f°"),
 		valF(s.TempMinF, "lo %.0f°"),
 		valF(s.TempAvgF, "avg %.0f°"),
-		fmt.Sprintf("rain %.2f in", s.RainIn),
+		historicalRainLabel(s.RainIn, s.RainReadings, s.Obs),
 		valF(s.PeakGustMph, "gust %.0f mph"),
 	})
 }
@@ -201,7 +198,7 @@ func renderWeekView(days []store.DayStat, offset int) string {
 				rangeBand(lo, hi, scaleLo, scaleHi, bandW, tempColor) +
 				lipgloss.NewStyle().Foreground(tempColor(hi)).Render(fmt.Sprintf(" %-5s", fmt.Sprintf("%.0f°", hi)))
 		}
-		line += faint().Render(" rain ") + rainCell(d.RainIn, 0)
+		line += faint().Render(" rain ") + rainCell(d.RainIn, 0, d.RainReadings < d.Obs)
 		if d.PeakGustMph != nil {
 			line += faint().Render("  gust ") + fmt.Sprintf("%.0f", *d.PeakGustMph)
 		}
@@ -214,8 +211,16 @@ func renderWeekView(days []store.DayStat, offset int) string {
 // rainCell prints a daily rain amount width columns wide (0 = natural width),
 // dimming the zeros so wet days pop. Padding happens before styling: a %*s
 // over the styled string would count the ANSI escapes as width and pad nothing.
-func rainCell(in float64, width int) string {
-	s := fmt.Sprintf("%*.2f", width, in)
+func rainCell(value *float64, width int, partial bool) string {
+	if value == nil {
+		return faint().Render(fmt.Sprintf("%*s", width, gapDot))
+	}
+	in := *value
+	s := fmt.Sprintf("%.2f", in)
+	if partial {
+		s = "≥" + s
+	}
+	s = fmt.Sprintf("%*s", width, s)
 	if in == 0 {
 		return faint().Render(s)
 	}
@@ -234,17 +239,22 @@ func orFallback(a, b *float64) float64 {
 func weekStats(days []store.DayStat) string {
 	var hi, lo, gust *float64
 	rain, rainy := 0.0, 0
+	var reads, obs int64
 	for _, d := range days {
 		hi, lo = maxPtrVal(hi, d.TempMaxF), minPtrVal(lo, d.TempMinF)
 		gust = maxPtrVal(gust, d.PeakGustMph)
-		rain += d.RainIn
-		if d.RainIn >= 0.01 {
+		reads += d.RainReadings
+		obs += d.Obs
+		if d.RainIn != nil {
+			rain += *d.RainIn
+		}
+		if d.RainIn != nil && *d.RainIn >= 0.01 {
 			rainy++
 		}
 	}
 	return statRow([]string{
 		valF(hi, "hi %.0f°"), valF(lo, "lo %.0f°"),
-		fmt.Sprintf("rain %.2f in", rain),
+		historicalRainLabel(historicalRainTotal(rain, reads), reads, obs),
 		pluralN(rainy, "rainy day"),
 		valF(gust, "gust %.0f mph"),
 	})
@@ -296,11 +306,16 @@ func renderMonthView(days []store.DayStat, offset int, metric heatMetric) string
 	stats = append(stats, "")
 	var mhi, mlo, mgust *float64
 	rain, rainy, observed := 0.0, 0, 0
+	var reads, obs int64
 	for _, d := range days {
 		mhi, mlo = maxPtrVal(mhi, d.TempMaxF), minPtrVal(mlo, d.TempMinF)
 		mgust = maxPtrVal(mgust, d.PeakGustMph)
-		rain += d.RainIn
-		if d.RainIn >= 0.01 {
+		reads += d.RainReadings
+		obs += d.Obs
+		if d.RainIn != nil {
+			rain += *d.RainIn
+		}
+		if d.RainIn != nil && *d.RainIn >= 0.01 {
 			rainy++
 		}
 		if d.Obs > 0 {
@@ -309,7 +324,7 @@ func renderMonthView(days []store.DayStat, offset int, metric heatMetric) string
 	}
 	stats = append(stats,
 		statRow([]string{valF(mhi, "hi %.0f°"), valF(mlo, "lo %.0f°")}),
-		statRow([]string{fmt.Sprintf("rain %.2f in", rain), pluralN(rainy, "rainy day")}),
+		statRow([]string{historicalRainLabel(historicalRainTotal(rain, reads), reads, obs), pluralN(rainy, "rainy day")}),
 		statRow([]string{valF(mgust, "gust %.0f mph")}),
 		statRow([]string{fmt.Sprintf("observed %d/%d days", observed, daysIn(start, end))}),
 	)
@@ -427,7 +442,9 @@ func monthStrip(months []store.PeriodStat, start time.Time) string {
 	rainHi := 0.0
 	for _, p := range months {
 		byMonth[p.Period] = p
-		rainHi = max(rainHi, p.RainIn)
+		if p.RainIn != nil {
+			rainHi = max(rainHi, *p.RainIn)
+		}
 	}
 	head, temp, rain := strings.Repeat(" ", 6), faint().Render(fmt.Sprintf("%-6s", "temp")), faint().Render(fmt.Sprintf("%-6s", "rain"))
 	for m := 1; m <= 12; m++ {
@@ -444,11 +461,15 @@ func monthStrip(months []store.PeriodStat, start time.Time) string {
 		} else {
 			temp += faint().Render(gapDot) + "   "
 		}
+		if p.RainIn == nil {
+			rain += faint().Render(gapDot) + "   "
+			continue
+		}
 		idx := 0
 		if rainHi > 0 {
-			idx = int(norm(p.RainIn, 0, rainHi) * float64(len(blocks8)-1))
+			idx = int(norm(*p.RainIn, 0, rainHi) * float64(len(blocks8)-1))
 		}
-		rain += lipgloss.NewStyle().Foreground(rainColor(p.RainIn, 0, rainHi)).
+		rain += lipgloss.NewStyle().Foreground(rainColor(*p.RainIn, 0, rainHi)).
 			Render(string(blocks8[idx])) + "   "
 	}
 	return strings.Join([]string{head, temp, rain}, "\n")
@@ -458,14 +479,19 @@ func monthStrip(months []store.PeriodStat, start time.Time) string {
 func yearStats(days []store.DayStat) string {
 	var hi, lo, gust *float64
 	rain := 0.0
+	var reads, obs int64
 	for _, d := range days {
 		hi, lo = maxPtrVal(hi, d.TempMaxF), minPtrVal(lo, d.TempMinF)
 		gust = maxPtrVal(gust, d.PeakGustMph)
-		rain += d.RainIn
+		reads += d.RainReadings
+		obs += d.Obs
+		if d.RainIn != nil {
+			rain += *d.RainIn
+		}
 	}
 	return statRow([]string{
 		valF(hi, "hi %.0f°"), valF(lo, "lo %.0f°"),
-		fmt.Sprintf("rain %.2f in", rain),
+		historicalRainLabel(historicalRainTotal(rain, reads), reads, obs),
 		valF(gust, "gust %.0f mph"),
 	})
 }
@@ -530,7 +556,7 @@ func renderRecordsView(rd recordsData) string {
 		}
 		for _, yd := range rd.thisDay {
 			line := fmt.Sprintf("  %-6d %s %s %s",
-				yd.Year, tempCell(yd.TempMaxF), tempCell(yd.TempMinF), rainCell(yd.RainIn, 8))
+				yd.Year, tempCell(yd.TempMaxF), tempCell(yd.TempMinF), rainCell(yd.RainIn, 8, yd.RainReadings < yd.Obs))
 			if yd.Year == hiYear && hiRec != nil {
 				line += faint().Render("   ← record high")
 			}
@@ -603,4 +629,20 @@ func pluralN(n int, noun string) string {
 	default:
 		return fmt.Sprintf("%d %ss", n, noun)
 	}
+}
+
+func historicalRainTotal(total float64, reads int64) *float64 {
+	if reads == 0 {
+		return nil
+	}
+	return &total
+}
+func historicalRainLabel(total *float64, reads, obs int64) string {
+	if total == nil {
+		return "rain unavailable"
+	}
+	if reads < obs {
+		return fmt.Sprintf("rain ≥%.2f in", *total)
+	}
+	return fmt.Sprintf("rain %.2f in", *total)
 }

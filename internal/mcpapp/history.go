@@ -331,9 +331,9 @@ func registerCalendarTools(srv *mcp.Server, st *store.Store) {
 			if y.TempMinF != nil && (out.RecordLowF == nil || *y.TempMinF < *out.RecordLowF) {
 				out.RecordLowF, out.RecordLowYear = y.TempMinF, y.Year
 			}
-			if y.RainIn > 0 && (out.WettestRainIn == nil || y.RainIn > *out.WettestRainIn) {
+			if y.RainIn != nil && (out.WettestRainIn == nil || *y.RainIn > *out.WettestRainIn) {
 				rain := y.RainIn
-				out.WettestRainIn, out.WettestYear = &rain, y.Year
+				out.WettestRainIn, out.WettestYear = rain, y.Year
 			}
 		}
 		if len(years) == 0 {

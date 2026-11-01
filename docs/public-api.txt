@@ -353,13 +353,14 @@ type Coverage struct {
 	MaxEpoch sql.NullInt64
 }
 type DayStat struct {
-	Day         string   `json:"day"` // YYYY-MM-DD, local time
-	TempMinF    *float64 `json:"temp_min_f,omitempty"`
-	TempMaxF    *float64 `json:"temp_max_f,omitempty"`
-	TempAvgF    *float64 `json:"temp_avg_f,omitempty"`
-	RainIn      float64  `json:"rain_in"`
-	PeakGustMph *float64 `json:"peak_gust_mph,omitempty"`
-	Obs         int64    `json:"obs"`
+	Day          string   `json:"day"` // YYYY-MM-DD, local time
+	TempMinF     *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF     *float64 `json:"temp_max_f,omitempty"`
+	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
+	RainIn       *float64 `json:"rain_in"`
+	RainReadings int64    `json:"rain_readings"`
+	PeakGustMph  *float64 `json:"peak_gust_mph,omitempty"`
+	Obs          int64    `json:"obs"`
 }
 type DegreeDayParams struct {
 	HeatingBaseF float64 // HDD base (US convention: 65°F)
@@ -414,8 +415,9 @@ type MonthNormal struct {
 	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
 	TempMinF     *float64 `json:"temp_min_f,omitempty"` // average of the monthly lows
 	TempMaxF     *float64 `json:"temp_max_f,omitempty"` // average of the monthly highs
-	AvgRainIn    float64  `json:"avg_rain_in"`
-	AvgRainyDays float64  `json:"avg_rainy_days"`
+	RainYears    int64    `json:"rain_years"`
+	AvgRainIn    *float64 `json:"avg_rain_in"`
+	AvgRainyDays *float64 `json:"avg_rainy_days"`
 }
 type Period uint8
 const (
@@ -427,11 +429,12 @@ type PeriodStat struct {
 	TempMinF     *float64 `json:"temp_min_f,omitempty"`
 	TempMaxF     *float64 `json:"temp_max_f,omitempty"`
 	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
-	RainIn       float64  `json:"rain_in"`
+	RainIn       *float64 `json:"rain_in"`
 	PeakGustMph  *float64 `json:"peak_gust_mph,omitempty"`
 	DaysObserved int64    `json:"days_observed"`
 	RainyDays    int64    `json:"rainy_days"`
 	Obs          int64    `json:"obs"`
+	RainReadings int64    `json:"rain_readings"`
 }
 type PressureStats struct {
 	DaysObserved int64 `json:"days_observed"`
@@ -640,12 +643,13 @@ func (w *Writer) Meta(ctx context.Context, key string) (string, bool, error)
 func (w *Writer) SetMeta(ctx context.Context, key, value string) error
 func (w *Writer) Watermark(ctx context.Context, deviceID int) (int64, bool, error)
 type YearDay struct {
-	Year        int      `json:"year"`
-	Day         string   `json:"day"` // YYYY-MM-DD, local time
-	TempMinF    *float64 `json:"temp_min_f,omitempty"`
-	TempMaxF    *float64 `json:"temp_max_f,omitempty"`
-	TempAvgF    *float64 `json:"temp_avg_f,omitempty"`
-	RainIn      float64  `json:"rain_in"`
-	PeakGustMph *float64 `json:"peak_gust_mph,omitempty"`
-	Obs         int64    `json:"obs"`
+	Year         int      `json:"year"`
+	Day          string   `json:"day"` // YYYY-MM-DD, local time
+	TempMinF     *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF     *float64 `json:"temp_max_f,omitempty"`
+	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
+	RainIn       *float64 `json:"rain_in"`
+	PeakGustMph  *float64 `json:"peak_gust_mph,omitempty"`
+	Obs          int64    `json:"obs"`
+	RainReadings int64    `json:"rain_readings"`
 }

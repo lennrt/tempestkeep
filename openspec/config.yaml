@@ -1,7 +1,7 @@
 schema: spec-driven
 
 context: |
-  TempestKeep is a Go 1.27.2 command and MCP stdio server for WeatherFlow Tempest.
+  TempestKeep is a Go 1.27.3 command and MCP stdio server for WeatherFlow Tempest.
   Read CONTRIBUTING.md and the relevant docs/adr records before implementation.
   Store observations in SI units, with exactly one device per SQLite archive.
   Keep Store reads separate from Writer mutations. Preserve append-only replay.

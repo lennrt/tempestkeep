@@ -19,7 +19,7 @@ operating system, or GitHub as trusted implementations.
 ## Trust roots
 
 - The user and the local operating-system account.
-- The Go 1.27.2 toolchain and Go checksum database.
+- The Go 1.27.3 toolchain and Go checksum database.
 - The configured WeatherFlow HTTPS endpoint.
 - Full commit SHAs in GitHub Actions.
 - The repository's reviewed source and generated API snapshot.

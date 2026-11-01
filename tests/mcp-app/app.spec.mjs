@@ -122,7 +122,13 @@ test('pointer selection uses plotted time gaps instead of evenly spaced indices'
   const points = [observations.points[0], observations.points[1], observations.points[10]];
   await page.evaluate(data => window.fixtureHost.send(data), { ...observations, points });
   await expect(app.locator('#chart-reading')).toHaveAttribute('max', '2');
-  const plot = await app.locator('.chart-hit').boundingBox();
+  // A queued resize can replace the SVG between the result assertion and
+  // geometry inspection. Wait for connected plot geometry before pointing.
+  let plot;
+  await expect.poll(async () => {
+    plot = await app.locator('.chart-hit').boundingBox();
+    return plot !== null;
+  }).toBe(true);
   // 70% of the time axis is nearest the final point. An index-based mapping
   // would select the middle row and hide the outage's actual spacing.
   await page.mouse.click(plot.x + plot.width * .7, plot.y + plot.height / 2);
@@ -384,8 +390,22 @@ test('malformed results surface an error and recover on valid host data', async 
 
 test('documentation screenshots', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 });
-  for (const [view, name] of [['weather', 'mcp-app-weather.png'], ['table', 'mcp-app-table.png']]) {
+  for (const [view, name] of [
+    ['weather', 'mcp-app-weather.png'], ['table', 'mcp-app-table.png'],
+    ['forecast', 'mcp-app-forecast.png'], ['stations', 'mcp-app-devices.png'],
+  ]) {
     const app = await openApp(page, view);
+    if (view === 'forecast') {
+      await app.getByRole('button', { name: 'daily', exact: true }).click();
+      await expect(app.locator('.metrics')).toContainText('Highest forecast');
+      await expect(app.locator('.metric-value')).toHaveText(['80.96°F', '47.16°F', '65%', '7']);
+    }
+    if (view === 'stations') {
+      await app.getByRole('button', { name: 'devices', exact: true }).click();
+      await app.locator('#search').fill('Demo roof');
+      await expect(app.locator('tbody tr')).toHaveCount(8);
+      await expect(app.locator('tbody tr').first()).toContainText('Demo roof');
+    }
     await expect(app.locator('tbody tr').first()).toBeVisible();
     if (process.env.CAPTURE_SCREENSHOTS === '1') {
       await mkdir('docs/screenshots', { recursive: true });

@@ -190,6 +190,11 @@ sensor reading breaks the run. One valid reading lets a day qualify, so a
 reported spell does not imply complete sensor coverage throughout every day.
 
 `comfort_stats` calculates apparent temperature from 15-minute sensor means.
+Heat index and dew point use temperature and humidity from the same rows.
+Wind chill uses temperature and wind speed from the same rows. Unpaired
+readings cannot create a derived value. Each candidate uses its own paired
+temperature mean. Ordinary air-temperature summaries still use all temperature
+readings.
 At or above 80°F, it needs humidity. At or below 50°F, it needs wind speed.
 Between those temperatures, it uses air temperature alone. Missing required
 readings leave the apparent value unavailable. These calculated extremes
@@ -200,6 +205,20 @@ Empty calendar periods and empty series buckets are absent. Do not fill them
 with zero and call the result observed weather. A day with a few observations
 can still contribute to a daily summary. Compare sample counts and covered
 dates before ranking days, months, or years.
+
+Historical daily, month/year, and this-day summaries return `rain_in: null`
+when no rain readings exist. Measured zero remains numeric zero. `obs` and
+`rain_readings` expose sample counts. A partial range sums available readings.
+A count below `obs` means some samples lack rain, not that the total is zero.
+
+Climate rain normals use only months with rain readings. `rain_years` counts
+those contributing years for each calendar month, independently of temperature
+years. Partial months still contribute their available totals. `avg_rain_in`
+and `avg_rainy_days` are null when `rain_years` is zero. These are available
+sample averages, not estimates of complete months. Go callers must handle
+nullable `RainIn` fields on `DayStat`, `PeriodStat`, and `YearDay`, plus
+nullable `MonthNormal.AvgRainIn` and `MonthNormal.AvgRainyDays`. JSON consumers
+must accept explicit null rain fields and the additional sample counts.
 
 `climate_normals` describes the available archive. It does not establish a
 standard long-term climate baseline. `temperature_trend` fits one slope with a

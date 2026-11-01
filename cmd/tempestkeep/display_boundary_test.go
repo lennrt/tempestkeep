@@ -127,13 +127,13 @@ func TestDaysInCountsCalendarDaysAcrossSpringForward(t *testing.T) {
 
 func TestWeekViewKeepsRainWhenTemperatureIsMissing(t *testing.T) {
 	day := time.Now().Format(time.DateOnly)
-	text := renderWeekView([]store.DayStat{{Day: day, Obs: 12, RainIn: 1.25, PeakGustMph: new(18.0)}}, 0)
+	text := renderWeekView([]store.DayStat{{Day: day, Obs: 12, RainIn: new(1.25), PeakGustMph: new(18.0)}}, 0)
 	if strings.Contains(text, "no observations") || !strings.Contains(text, "1.25") || !strings.Contains(text, "18") {
 		t.Fatalf("missing temperature hid other observations:\n%s", text)
 	}
 	start, _, _ := periodRange(viewWeek, 0, time.Now())
 	text = renderWeekView([]store.DayStat{
-		{Day: start.Format(time.DateOnly), Obs: 12, RainIn: 1.25},
+		{Day: start.Format(time.DateOnly), Obs: 12, RainIn: new(1.25)},
 		{Day: start.AddDate(0, 0, 1).Format(time.DateOnly), Obs: 12, TempMinF: new(55.0), TempMaxF: new(70.0)},
 	}, 0)
 	rows := strings.Split(text, "\n")

@@ -6,7 +6,7 @@ input and output. This command does not start an HTTP server or open a port.
 
 ## Build and connect
 
-Use Go 1.27.2 from the repository root:
+Use Go 1.27.3 from the repository root:
 
 ```sh
 make tempestkeep
@@ -75,6 +75,12 @@ resolution can be retried, subject to the configured API cache lifetime.
 Without a selection, the server uses the first
 accessible Tempest device. The archive rejects writes for a different device.
 
+CLI `collect` has a different automatic rule: it reuses an existing archive's
+device. New archives and empty archives without a saved device discover the first
+accessible Tempest device. An empty archive with a saved device keeps that device.
+Use an explicit positive selector when an old archive has no usable identity.
+MCP keeps its lazy live selection rule described above.
+
 The selected device sets the default station for live conditions and forecasts,
 which remain station-level API results. It also selects the exact device for
 archive collection. An explicit tool `station_id` overrides the station for that
@@ -82,6 +88,10 @@ read only. `list_stations` still lists every accessible station. With no token,
 a valid device setting does not change archive-only reads. Current conditions
 can still fall back to the archive and report `source: "archive"` if live access
 fails. Failed station resolution never labels an archive with another station.
+
+For CLI collection, every nonempty environment ID, including zero, must be
+positive. Explicit zero flags also fail before archive or API access. MCP
+retains its zero environment value as automatic selection.
 
 Malformed or negative environment IDs fail before archive or API access. Explicit
 flag IDs must be positive; a valid flag overrides an invalid environment value.
@@ -93,6 +103,14 @@ observations for the failed selection.
 belongs to that station. Missing or mismatched identity leaves those fields
 absent. Do not assume that live weather and a configured archive describe the
 same station. See the [query guide](querying.md) before combining their results.
+
+Live observations select the greatest accepted timestamp rather than relying
+on API row order. All rows still pass validation before selection. The first
+row wins when several rows share the greatest timestamp.
+
+Historical rain results include nullable totals and sample counts. Rain normals
+expose `rain_years` and nullable averages. See the
+[query guide](querying.md) before comparing partial months or handling JSON null.
 
 ## MCP Apps
 

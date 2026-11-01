@@ -207,7 +207,9 @@ func TestDailySummary(t *testing.T) {
 	gotMin, gotMax := math.Inf(1), math.Inf(-1)
 	for _, d := range days {
 		totalObs += d.Obs
-		totalRain += d.RainIn
+		if d.RainIn != nil {
+			totalRain += *d.RainIn
+		}
 		if d.TempMinF != nil && *d.TempMinF < gotMin {
 			gotMin = *d.TempMinF
 		}

@@ -15,8 +15,9 @@ your archive and default live station:
    In a supporting MCP Apps host, open the **Devices** table and search by ID,
    serial number, or station name. Each device keeps its parent station beside it.
 2. Set `TEMPEST_DEVICE_ID` or start MCP with `--device-id` to select that device.
-   The flag overrides the environment. Without a selection, TempestKeep chooses
-   the first accessible Tempest device.
+   The flag overrides the environment. MCP defaults to the first accessible
+   Tempest device. CLI collection reuses an existing archive's device and
+   discovers a device for a new archive or an empty archive without a saved device.
 3. Keep **one device per archive**. Give each device its own archive path when
    collecting from several stations; TempestKeep rejects writes for another device.
 
@@ -27,6 +28,11 @@ default or the archive. See [device selection and capabilities](mcp.md#capabilit
 [MCP configuration](mcp.md#build-and-connect), and the
 [searchable device view](mcp-apps.md#read-charts-and-tables).
 
+![Synthetic station devices filtered by name](screenshots/mcp-app-devices.png)
+
+*The Devices table keeps each device beside its parent station. This example
+uses synthetic stations in the local MCP Apps test host.*
+
 ## Explore weather in your conversation
 
 In a host that supports MCP Apps, ask for a forecast, daily summary, wind rose,
@@ -35,6 +41,8 @@ or archive query, then open its interactive view.
 | Try this | What you can do |
 |---|---|
 | Inspect a dense weather chart | Point, tap, or use the keyboard slider to inspect every displayed reading, up to 2,000 points, with its time and units. |
+| Read a daily forecast | Compare daily high, low, and maximum rain probability, then switch to hourly details. |
+| Inspect a long SQL value | Search up to 65,536 characters per cell and open its text inspector. |
 | Find a particular day or device | Search returned rows, sort columns, and move through table pages. |
 | Refresh while exploring | Keep the selected table, search, sort, and valid page when the refreshed columns remain compatible. |
 | Check incomplete observations | Inspect rain or lightning coverage in observation series, and distinguish missing rain, measured zero, and partial totals in rainfall summaries. |
@@ -46,6 +54,9 @@ explains controls, limits, and host support.
 
 ## Repair and reuse an archive
 
+- **Inspect offline coverage.** Run `tempestkeep status --format json` for
+  freshness, backfill state, and up to ten internal gaps over one hour.
+  See [archive status](../cmd/tempestkeep/README.md#archive-status).
 - **Fill a historical gap.** Use `collect --start YYYY-MM-DD --end YYYY-MM-DD`
   for an inclusive range of up to 366 local calendar days. Repeat an interrupted
   command safely: committed observations remain and duplicates are ignored.
@@ -110,7 +121,7 @@ See [offline startup and capabilities](mcp.md#start-and-stop) and
 - [MCP Apps ADR](adr/0006-mcp-apps.md): embedded views, protocol compatibility,
   browser boundaries, and the proposed 0.3.0 release.
 
-- [Go patch toolchain ADR](adr/0007-go-patch-toolchain.md): the Go 1.27.2 pin and
+- [Go patch toolchain ADR](adr/0007-go-patch-toolchain.md): the historical Go 1.27.2 pin and
   qualification of the updated toolchain.
 
 - [Archive recovery and coverage ADR](adr/0008-archive-recovery-and-coverage.md):
@@ -125,6 +136,23 @@ See [offline startup and capabilities](mcp.md#start-and-stop) and
   MCP device choice, station-device tables, pressure samples, and report bounds.
 - [Rain summary coverage ADR](adr/0012-rain-summary-coverage.md): nullable totals,
   sample counts, and missing/partial rain in reports and interactive views.
+
+- [Paired comfort ADR](adr/0013-paired-comfort-readings.md): matching sensor
+  inputs before calculating apparent temperature and dew point.
+- [Unique backup ADR](adr/0014-unique-archive-backups.md): bounded collision
+  handling and retention across old and new snapshot names.
+- [Result exploration ADR](adr/0015-bounded-result-exploration.md): daily
+  forecast cards, cell inspection, and dataset keyboard focus.
+- [Offline status ADR](adr/0016-offline-archive-status.md): read-only coverage,
+  freshness, saved backfill state, and bounded internal gaps.
+- [Historical rain ADR](adr/0017-historical-rain-coverage.md): nullable totals,
+  sample counts, and rain-contributing years in normals.
+- [Collection identity and live order ADR](adr/0018-preserve-collection-device-and-live-order.md):
+  automatic CLI device selection, positive selectors, and newest live readings.
+- [Go security patch ADR](adr/0020-go-security-patch.md): the active Go 1.27.3
+  pin, GO-2026-6809 fix, and preservation of historical check records.
+- [Next development version ADR](adr/0019-next-development-version.md): the
+  0.5.0 target and preserved publication boundaries.
 
 ## Review correctness and security
 

@@ -3,6 +3,8 @@
 export const MAX_ROWS = 2000;
 export const MAX_COLUMNS = 64;
 export const PAGE_SIZE = 8;
+export const MAX_CELL_TEXT = 65536;
+export const cellSearchText = (value, key, sql) => sql && typeof value === "string" ? value.slice(0, MAX_CELL_TEXT) : formatted(value, key, sql);
 export const number = (value) => typeof value === "number" && Number.isFinite(value);
 export const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 export const text = (value, limit = 2048) => {
@@ -42,8 +44,8 @@ const eventSensors = [
   { value: "rain_in", count: "rain_readings", name: "Rain" },
   { value: "lightning_strikes", count: "lightning_readings", name: "Lightning" },
 ];
-function observationDisplay(rows) {
-  const coverage = eventSensors.map(sensor => ({
+function observationDisplay(rows, sensors = eventSensors) {
+  const coverage = sensors.map(sensor => ({
     name: sensor.name,
     missing: rows.filter(row => row[sensor.count] === 0).length,
     partial: rows.filter(row => number(row[sensor.count]) && row[sensor.count] > 0 && number(row.obs) && row[sensor.count] < row.obs).length,
@@ -51,10 +53,11 @@ function observationDisplay(rows) {
   // Keep the received result intact. Only explicit zero counts turn a numeric
   // total into a missing display reading; older results without counts still work.
   const displayRows = rows.map(row => {
-    const missing = eventSensors.filter(sensor => row[sensor.count] === 0);
+    const missing = sensors.filter(sensor => row[sensor.count] === 0);
     if (!missing.length) return row;
     const display = { ...row };
     missing.forEach(sensor => { display[sensor.value] = null; });
+    if (row.rain_readings === 0 && Object.hasOwn(row, "rainy_days")) display.rainy_days = null;
     return display;
   });
   return { rows: displayRows, coverage };
@@ -103,11 +106,12 @@ export function datasets(data, tool = "") {
     if (!Array.isArray(value)) continue;
     if (tool === "list_stations" && name === "devices") continue; // Reserved for the parent-linked view below.
     const receivedRows = value.slice(0, MAX_ROWS).filter(object);
-    const { rows, coverage } = tool === "get_observations" && name === "points" ? observationDisplay(receivedRows) : { rows: receivedRows };
+    const historyRain = ({ daily_summary: "days", period_summary: "periods", this_day_in_history: "years" })[tool] === name;
+    const { rows, coverage } = tool === "get_observations" && name === "points" ? observationDisplay(receivedRows) : historyRain ? observationDisplay(receivedRows, eventSensors.slice(0, 1)) : { rows: receivedRows };
     const keys = [...new Set(rows.flatMap(row => Object.keys(row).slice(0, MAX_COLUMNS)))];
     const displayKeys = keys.includes("epoch") && keys.some(key => ["time", "day", "date"].includes(key)) ? [...keys.filter(key => key !== "epoch"), "epoch"] : keys;
     const columns = displayKeys.slice(0, MAX_COLUMNS).map(key => ({ key, title: `${label(key)}${unit(key) ? ` (${unit(key)})` : ""}`, raw: key }));
-    tables.push({ name, columns, rows, coverage, limited: value.length > MAX_ROWS || keys.length > MAX_COLUMNS, sql: false });
+    tables.push({ name, columns, rows, coverage, coverageUnit: historyRain ? "row" : "bucket", limited: value.length > MAX_ROWS || keys.length > MAX_COLUMNS, sql: false });
   }
   if (tool === "list_stations" && Array.isArray(data.stations)) tables.push(stationDevices(data.stations));
   return tables;

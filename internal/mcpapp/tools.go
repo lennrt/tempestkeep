@@ -357,7 +357,7 @@ func fillRainToday(ctx context.Context, st *store.Store, c *ConditionsOut) {
 		return
 	}
 	rain := last.RainIn
-	c.RainTodayIn = &rain
+	c.RainTodayIn = rain
 }
 
 // fillPressureTrend adds the archive's barometric rate normalized to 3 hours.

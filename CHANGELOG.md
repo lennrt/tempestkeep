@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.5.0 (proposed, unreleased)
+
+This development batch contains ten improvements:
+
+1. Pair temperature with humidity or wind from the same observations for
+   comfort calculations, so unrelated samples cannot create apparent extremes.
+2. Preserve missing historical rainfall as null, expose sample counts, and
+   average rain normals over rain-contributing months with `rain_years`.
+   Keep missing rain buckets as gaps in the terminal day chart.
+3. Create distinct nanosecond backup names, retry bounded collisions, and
+   retain both legacy and new names in chronological order.
+4. Select the newest accepted live observation by timestamp, independent of
+   response order, with the first row winning equal timestamps.
+5. Reuse the existing archive device for unattended CLI collection when no
+   explicit selector exists. New or unbound empty archives still discover a device.
+6. Add read-only offline `status` text and JSON reports for archive freshness,
+   saved backfill state, and bounded internal gaps.
+7. Show daily forecast high, low, and maximum rain probability in app cards.
+8. Add bounded long-cell inspection and SQL text search beyond cell previews.
+9. Preserve keyboard focus after changing the selected app dataset.
+10. Reject explicit zero CLI collection device selectors before archive or API
+    access, consistent with the positive-ID contract.
+
+### Supporting security repair
+
+- Require Go 1.27.3 for builds and checks to fix
+  [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809) in the standard library.
+  Rebuild older binaries with the patched toolchain. This repair supports the
+  ten improvements above and does not change language dependencies. See
+  [ADR 0020](docs/adr/0020-go-security-patch.md).
+
+### Compatibility
+
+Go callers must handle nullable `DayStat.RainIn`, `PeriodStat.RainIn`,
+`YearDay.RainIn`, `MonthNormal.AvgRainIn`, and `MonthNormal.AvgRainyDays`.
+Historical JSON rain fields now encode numbers or explicit null. Additional
+`rain_readings` and `rain_years` fields describe samples, not continuous coverage.
+Partial months still contribute their available rain totals to normals.
+
+CLI collection without a selector now follows existing archive identity rather
+than the first accessible live device. Nonempty zero environment selectors fail
+for CLI collection. MCP retains its automatic zero environment selection rule.
+Existing archives need no schema migration. Backup naming changes, while
+retention continues to recognize legacy names. Dependencies remain unchanged.
+Metadata reads now enforce the writer's existing 4,096-byte and NUL limits
+in UTF-8 bytes, including when SQLite stores text as UTF-16.
+Oversized, null, or NUL-containing stored values return `ErrInvalidArchive`.
+
+Active development, plugin, and app metadata target 0.5.0. Untagged fallback
+builds report `v0.5.0-dev`. Historical release records below remain unchanged.
+No tag, release, plugin publication, or merge is part of this development change.
+Qualification still follows [RELEASING.md](RELEASING.md).
+
 ## 0.4.0 (proposed, unreleased)
 
 ### Added

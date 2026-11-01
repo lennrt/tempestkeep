@@ -3,7 +3,7 @@
 This catalog converts repository guarantees into test targets. A passing test is
 evidence for the tested case. It is not proof of the general property.
 
-All commands require Go 1.27.2. Tests have finite timeouts. Focused fuzz tests
+All commands require Go 1.27.3. Tests have finite timeouts. Focused fuzz tests
 store any failing input in the Go fuzz corpus so the failure can be replayed.
 
 | ID | Property | Faults and boundaries | Current verification |

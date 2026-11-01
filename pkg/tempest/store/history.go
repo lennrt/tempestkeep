@@ -15,14 +15,15 @@ import (
 // YearDay is one calendar year's aggregates for a single month/day (one row of
 // a "this day in history" answer), in US display units.
 type YearDay struct {
-	Year        int      `json:"year"`
-	Day         string   `json:"day"` // YYYY-MM-DD, local time
-	TempMinF    *float64 `json:"temp_min_f,omitempty"`
-	TempMaxF    *float64 `json:"temp_max_f,omitempty"`
-	TempAvgF    *float64 `json:"temp_avg_f,omitempty"`
-	RainIn      float64  `json:"rain_in"`
-	PeakGustMph *float64 `json:"peak_gust_mph,omitempty"`
-	Obs         int64    `json:"obs"`
+	Year         int      `json:"year"`
+	Day          string   `json:"day"` // YYYY-MM-DD, local time
+	TempMinF     *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF     *float64 `json:"temp_max_f,omitempty"`
+	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
+	RainIn       *float64 `json:"rain_in"`
+	PeakGustMph  *float64 `json:"peak_gust_mph,omitempty"`
+	Obs          int64    `json:"obs"`
+	RainReadings int64    `json:"rain_readings"`
 }
 
 // ThisDay returns the aggregates for one month/day across every year in the
@@ -57,9 +58,9 @@ func (s *Store) ThisDay(ctx context.Context, month, day int) ([]YearDay, error) 
 
 		var tmin, tmax, gust sql.NullFloat64
 		var tempSum, rainMm float64
-		var tempN, obs int64
+		var tempN, obs, rainN int64
 		if err := db.QueryRowContext(ctx, qryThisDay, start.Unix(), end.Unix()).
-			Scan(&tmin, &tmax, &tempSum, &tempN, &rainMm, &gust, &obs); err != nil {
+			Scan(&tmin, &tmax, &tempSum, &tempN, &rainMm, &gust, &obs, &rainN); err != nil {
 			return nil, archiveFailure("read this-day history", err)
 		}
 		if obs == 0 {
@@ -67,7 +68,7 @@ func (s *Store) ThisDay(ctx context.Context, month, day int) ([]YearDay, error) 
 		}
 		yd := YearDay{
 			Year: y, Day: start.Format("2006-01-02"), Obs: obs,
-			RainIn: model.MmToInch(rainMm),
+			RainIn: rainTotalIn(rainMm, rainN), RainReadings: rainN,
 		}
 		yd.TempMinF, yd.TempMaxF = cToFPtr(tmin), cToFPtr(tmax)
 		if tempN > 0 {
@@ -81,6 +82,8 @@ func (s *Store) ThisDay(ctx context.Context, month, day int) ([]YearDay, error) 
 }
 
 // PeriodStat is one calendar month or year of aggregates, in US display units.
+// RainIn is nil without rain readings, otherwise the available sample sum.
+// RainyDays counts observed rainy days; missing samples never establish dry days.
 // TempAvgF is the mean over every observation in the period (not a mean of
 // daily means); a rainy day is one with at least 0.01 in (0.254 mm) of rain.
 type PeriodStat struct {
@@ -88,11 +91,12 @@ type PeriodStat struct {
 	TempMinF     *float64 `json:"temp_min_f,omitempty"`
 	TempMaxF     *float64 `json:"temp_max_f,omitempty"`
 	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
-	RainIn       float64  `json:"rain_in"`
+	RainIn       *float64 `json:"rain_in"`
 	PeakGustMph  *float64 `json:"peak_gust_mph,omitempty"`
 	DaysObserved int64    `json:"days_observed"`
 	RainyDays    int64    `json:"rainy_days"`
 	Obs          int64    `json:"obs"`
+	RainReadings int64    `json:"rain_readings"`
 }
 
 // rainyDayMm is the daily rainfall at or above which a day counts as rainy:
@@ -154,6 +158,7 @@ type periodAcc struct {
 	tempSum float64
 	tempN   int64
 	rainMm  float64
+	rainN   int64
 	gustMax *float64
 	days    int64
 	rainy   int64
@@ -166,6 +171,7 @@ func (p *periodAcc) add(d dayAgg) {
 	p.tempSum += d.tempSum
 	p.tempN += d.tempN
 	p.rainMm += d.rainMm
+	p.rainN += d.rainN
 	p.gustMax = maxPtr(p.gustMax, d.gustMax)
 	p.days++
 	if d.rainMm >= rainyDayMm {
@@ -176,7 +182,7 @@ func (p *periodAcc) add(d dayAgg) {
 
 func (p *periodAcc) stat() PeriodStat {
 	ps := PeriodStat{
-		Period: p.period, RainIn: model.MmToInch(p.rainMm),
+		Period: p.period, RainIn: rainTotalIn(p.rainMm, p.rainN), RainReadings: p.rainN,
 		DaysObserved: p.days, RainyDays: p.rainy, Obs: p.obs,
 	}
 	if p.tempMin != nil {
@@ -201,7 +207,9 @@ func (p *periodAcc) stat() PeriodStat {
 // MonthNormal is one calendar month's climate normal: the average conditions for
 // that month across every year the archive covers, in US display units. The
 // temperature normals average the per-year monthly means and extremes; the rain
-// normals average the per-year monthly totals and rainy-day counts.
+// normals average available monthly totals and observed rainy-day counts only
+// for years with rain readings. Partial months contribute; these are not complete
+// calendar totals and sample counts do not establish temporal completeness.
 type MonthNormal struct {
 	Month        int      `json:"month"`      // 1-12
 	MonthName    string   `json:"month_name"` // January ... December
@@ -209,8 +217,9 @@ type MonthNormal struct {
 	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
 	TempMinF     *float64 `json:"temp_min_f,omitempty"` // average of the monthly lows
 	TempMaxF     *float64 `json:"temp_max_f,omitempty"` // average of the monthly highs
-	AvgRainIn    float64  `json:"avg_rain_in"`
-	AvgRainyDays float64  `json:"avg_rainy_days"`
+	RainYears    int64    `json:"rain_years"`
+	AvgRainIn    *float64 `json:"avg_rain_in"`
+	AvgRainyDays *float64 `json:"avg_rainy_days"`
 }
 
 // monthNormalAcc accumulates one calendar month across years.
@@ -219,6 +228,7 @@ type monthNormalAcc struct {
 	tempAvgN, tempMinN, tempMaxN       int64
 	rainSum, rainySum                  float64
 	years                              int64
+	rainYears                          int64
 }
 
 // MonthlyNormals computes the climate normal for each calendar month from every
@@ -262,8 +272,11 @@ func monthlyNormalsFrom(months []PeriodStat) []MonthNormal {
 			a.tempMaxSum += *m.TempMaxF
 			a.tempMaxN++
 		}
-		a.rainSum += m.RainIn
-		a.rainySum += float64(m.RainyDays)
+		if m.RainIn != nil {
+			a.rainSum += *m.RainIn
+			a.rainySum += float64(m.RainyDays)
+			a.rainYears++
+		}
 	}
 
 	var out []MonthNormal
@@ -274,8 +287,11 @@ func monthlyNormalsFrom(months []PeriodStat) []MonthNormal {
 		}
 		mn := MonthNormal{
 			Month: i + 1, MonthName: time.Month(i + 1).String(), Years: a.years,
-			AvgRainIn:    a.rainSum / float64(a.years),
-			AvgRainyDays: a.rainySum / float64(a.years),
+			RainYears: a.rainYears,
+		}
+		if a.rainYears > 0 {
+			rain, rainy := a.rainSum/float64(a.rainYears), a.rainySum/float64(a.rainYears)
+			mn.AvgRainIn, mn.AvgRainyDays = &rain, &rainy
 		}
 		if a.tempAvgN > 0 {
 			v := a.tempAvgSum / float64(a.tempAvgN)

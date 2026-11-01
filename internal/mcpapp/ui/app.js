@@ -1,5 +1,5 @@
 import { App, applyDocumentTheme, applyHostStyleVariables } from "@modelcontextprotocol/ext-apps";
-import { PAGE_SIZE, MAX_COLUMNS, number, object, text, pretty, label, unit, formatted, datasets, numericColumns, cell, compare, dateLabel, timeLabel, rainSummaryDisplay } from "./data.js";
+import { PAGE_SIZE, MAX_COLUMNS, MAX_CELL_TEXT, cellSearchText, number, object, text, pretty, label, unit, formatted, datasets, numericColumns, cell, compare, dateLabel, timeLabel, rainSummaryDisplay } from "./data.js";
 import { seriesChart, windChart } from "./charts.js";
 
 const TITLES = {
@@ -117,6 +117,16 @@ function heroBlock(data, primary, rows) {
 function metricCards(data, rows) {
   const cards = el("section", "metrics"); cards.setAttribute("aria-label", "Summary metrics");
   if (tool === "query_sql") return cards;
+  if (tool === "forecast" && state.tables[state.table]?.name === "daily") {
+    const entries = [
+      ["Highest forecast", aggregate(rows, "high_f", "max"), "high_f", "Highest daily temperature"],
+      ["Lowest forecast", aggregate(rows, "low_f", "min"), "low_f", "Lowest daily temperature"],
+      ["Rain chance", aggregate(rows, "precip_probability", "max"), "precip_probability", "Highest daily probability"],
+      ["Daily outlook", rows.length, "", "Days returned"],
+    ];
+    entries.forEach(args => cards.append(stat(...args)));
+    return cards;
+  }
   const conditions = tool === "current_conditions";
   const series = rows.some(row => Object.hasOwn(row, "temp_avg_f") || Object.hasOwn(row, "temp_f"));
   if (conditions || series) {
@@ -135,14 +145,15 @@ function metricCards(data, rows) {
 }
 function coverageNotice(table) {
   if (!table?.coverage?.length) return null;
-  const bucketCount = count => `${count.toLocaleString()} ${count === 1 ? "bucket" : "buckets"}`;
+  const rowUnit = table.coverageUnit ?? "bucket";
+  const bucketCount = count => `${count.toLocaleString()} ${rowUnit}${count === 1 ? "" : "s"}`;
   const descriptions = table.coverage.map(sensor => {
     const parts = [];
     if (sensor.missing) parts.push(`${bucketCount(sensor.missing)} without readings`);
     if (sensor.partial) parts.push(`${bucketCount(sensor.partial)} with partial readings`);
     return `${sensor.name}: ${parts.join(", ")}.`;
   });
-  const notice = el("p", "note", `Sensor coverage is incomplete. ${descriptions.join(" ")} Totals include reported readings only; missing buckets display —. Reading counts describe samples, not continuous uptime.`);
+  const notice = el("p", "note", `Sensor coverage is incomplete. ${descriptions.join(" ")} Totals include reported readings only; missing ${rowUnit}s display —. Reading counts describe samples, not continuous uptime.`);
   notice.id = "sensor-coverage";
   return notice;
 }
@@ -189,6 +200,7 @@ function tablePanel() {
   state.tables.forEach((dataset, i) => {
     const tab = button(pretty(dataset.name), "tab", () => {
       state.table = i; state.page = 0; state.search = ""; state.sort = null; state.metric = ""; render();
+      restoreTableFocus({ key: `dataset:${dataset.name}` });
     }, `dataset:${dataset.name}`); tab.setAttribute("aria-pressed", String(i === state.table)); tabs.append(tab);
   });
   const searchWrap = el("label", "search-wrap"); searchWrap.append(el("span", "sr-only", "Search rows"));
@@ -212,14 +224,44 @@ function tablePanel() {
   const previous = button("‹", "button", () => { state.page--; renderRows(); }, "previous"); previous.id = "previous"; previous.setAttribute("aria-label", "Previous page");
   const next = button("›", "button", () => { state.page++; renderRows(); }, "next"); next.id = "next"; next.setAttribute("aria-label", "Next page");
   pagination.append(previous, pageInfo, next); bottom.append(info, pagination); panel.append(bottom);
+  if (table.sql && table.rows.some(row => table.columns.some(column => typeof cell(row, column) === "string" && cell(row, column).length > MAX_CELL_TEXT))) {
+    panel.append(el("p", "note", "Long cell inspection and search use the first 65,536 characters per cell. The original tool result is unchanged."));
+  }
   if (table.limited) panel.append(el("p", "note", table.limitNotice ?? "Display limited to 2,000 rows and 64 columns. Narrow the tool request to inspect more."));
   return panel;
+}
+let cellDialog = null;
+function closeCellInspector() {
+  cellDialog?.close();
+  cellDialog?.remove();
+  cellDialog = null;
+}
+function inspectCell(value, column, trigger) {
+  closeCellInspector();
+  const dialog = el("dialog", "cell-dialog");
+  dialog.setAttribute("aria-labelledby", "cell-value-title");
+  const heading = el("h2", "", "Cell value"); heading.id = "cell-value-title";
+  const close = button("Close", "button", () => dialog.close());
+  const header = el("div", "cell-dialog-head"); header.append(heading, close);
+  dialog.append(header, el("p", "cell-column", column));
+  if (value.length > MAX_CELL_TEXT) dialog.append(el("p", "note", "Showing the first 65,536 characters. Search uses the same limit. Inspect the original tool result for the rest."));
+  const full = el("pre", "cell-value", value.slice(0, MAX_CELL_TEXT));
+  full.tabIndex = 0;
+  full.setAttribute("aria-label", "Full cell text within the inspection limit");
+  dialog.append(full);
+  dialog.addEventListener("close", () => {
+    dialog.remove();
+    if (trigger.isConnected) trigger.focus({ preventScroll: true });
+  }, { once: true });
+  cellDialog = dialog;
+  document.body.append(dialog);
+  dialog.showModal();
 }
 function renderRows() {
   const table = state.tables[state.table];
   if (!table) return;
   const query = state.search.trim().toLocaleLowerCase();
-  const rows = table.rows.filter(row => !query || table.columns.some(column => formatted(cell(row, column), column.raw, table.sql).toLocaleLowerCase().includes(query)));
+  const rows = table.rows.filter(row => !query || table.columns.some(column => cellSearchText(cell(row, column), column.raw, table.sql).toLocaleLowerCase().includes(query)));
   if (state.sort !== null) { const column = table.columns[state.sort]; rows.sort((a, b) => compare(cell(a, column), cell(b, column), state.direction)); }
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE)); state.page = Math.max(0, Math.min(state.page, pages - 1));
   const body = byId("data-table").querySelector("tbody"); body.replaceChildren();
@@ -227,7 +269,15 @@ function renderRows() {
     const tr = el("tr");
     table.columns.forEach(column => {
       const value = cell(row, column), td = el("td", number(value) ? "numeric" : value == null ? "null" : "", formatted(value, column.raw, table.sql));
-      td.title = value == null ? "Missing reading" : ["device_id", "station_id"].includes(column.raw) ? formatted(value, column.raw, table.sql) : text(value); tr.append(td);
+      td.title = value == null ? "Missing reading" : ["device_id", "station_id"].includes(column.raw) ? formatted(value, column.raw, table.sql) : text(value);
+      if (table.sql && typeof value === "string" && value.length > 2048) {
+        td.replaceChildren(el("span", "cell-preview", formatted(value, column.raw, true)));
+        const inspect = button("Inspect", "cell-inspect", () => inspectCell(value, column.title, inspect));
+        inspect.setAttribute("aria-label", `Inspect full value for ${column.title}`);
+        inspect.setAttribute("aria-haspopup", "dialog");
+        td.append(inspect);
+      }
+      tr.append(td);
     }); body.append(tr);
   }
   if (!rows.length) { const tr = el("tr"), td = el("td", "empty", query ? "No rows match your search." : tool === "list_stations" ? `No ${table.name} returned.` : "No readings returned for this range."); td.colSpan = Math.max(1, table.columns.length); tr.append(td); body.append(tr); }
@@ -251,6 +301,7 @@ function detailsPanel(data) {
 }
 function render() {
   if (!state.data) return;
+  closeCellInspector();
   const data = rainSummaryDisplay(state.data, tool);
   const table = state.tables[state.table], rows = table?.sql ? [] : table?.rows ?? [];
   byId("subtitle").textContent = data.from || data.to ? `${timeLabel(data.from ?? "Archive start")} — ${timeLabel(data.to ?? "Latest reading")}` : data.station || data.name || (data.time ? timeLabel(data.time) : "Your tool result, ready to explore.");
@@ -258,6 +309,10 @@ function render() {
   content.replaceChildren(heroBlock(data, table, rows));
   const cards = metricCards(data, rows); if (cards.childElementCount) content.append(cards);
   const coverage = coverageNotice(table); if (coverage) content.append(coverage);
+  if (tool === "climate_normals" && rows.some(row => Object.hasOwn(row, "rain_years"))) {
+    const note = el("p", "note", "Rain normals average only years with reported rain for that month (rain_years). Partial months can contribute; these are observed totals, not complete calendar-month totals. Missing rain normals display —.");
+    note.id = "normal-rain-coverage"; content.append(note);
+  }
   if (tool === "rain_stats") { const rainCoverage = rainSummaryNotice(data); if (rainCoverage) content.append(rainCoverage); }
   if (table) { const chart = tool === "wind_rose" && table.name === "sectors" ? windPanel(data, table) : chartPanel(table); if (chart) content.append(chart); content.append(tablePanel()); renderRows(); }
   if (data.truncated === true) content.append(el("p", "note", "Result truncated by the server. Search and pagination cover returned rows only. Narrow the query or increase max_rows within the server limit to see more."));
@@ -292,7 +347,7 @@ function receiveResult(result, preservePrevious = false) {
     render(); status();
     restoreTableFocus(focus);
   } catch (error) {
-    if (!preservePrevious) { content.replaceChildren(); state.data = null; state.tables = []; resetExploration(); }
+    if (!preservePrevious) { closeCellInspector(); content.replaceChildren(); state.data = null; state.tables = []; resetExploration(); }
     const detail = error instanceof SyntaxError ? "The tool returned invalid JSON. Run the tool again to retry." : text(error.message, 500);
     status(`${detail}${preservePrevious && state.data ? " The previous result is still shown." : ""}`, true);
   }
@@ -304,15 +359,16 @@ function receiveResult(result, preservePrevious = false) {
 app.ontoolinput = ({ arguments: args }) => {
   state.generation++;
   state.args = object(args) ? structuredClone(args) : args === undefined && tool !== "query_sql" ? {} : null;
+  closeCellInspector();
   state.busy = true; content.replaceChildren(); state.data = null; state.tables = []; resetExploration();
   status("Loading your weather data…"); updateRefresh();
 };
 app.ontoolresult = (result) => { state.generation++; receiveResult(result); };
-app.ontoolcancelled = () => { state.generation++; state.busy = false; content.replaceChildren(); state.data = null; state.tables = []; resetExploration(); status("This tool request was cancelled. Refresh to try again."); updateRefresh(); };
+app.ontoolcancelled = () => { closeCellInspector(); state.generation++; state.busy = false; content.replaceChildren(); state.data = null; state.tables = []; resetExploration(); status("This tool request was cancelled. Refresh to try again."); updateRefresh(); };
 app.onhostcontextchanged = hostContext;
 app.onerror = () => { state.busy = false; status("The host connection encountered an error. Run the tool again if the view does not recover.", true); updateRefresh(); };
 app.onclose = () => { state.generation++; state.connected = false; state.busy = false; byId("connection").textContent = "Host disconnected"; status("The host disconnected. Run this tool again to reconnect.", true); updateRefresh(); };
-app.onteardown = async () => { state.generation++; state.connected = false; updateRefresh(); return {}; };
+app.onteardown = async () => { closeCellInspector(); state.generation++; state.connected = false; updateRefresh(); return {}; };
 let resizeFrame = 0;
 window.addEventListener("resize", () => {
   cancelAnimationFrame(resizeFrame);

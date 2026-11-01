@@ -240,15 +240,36 @@ func (s *Store) Meta(ctx context.Context, key string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	var v string
-	switch err := db.QueryRowContext(ctx, qryMetaGet, key).Scan(&v); {
-	case err == nil:
-		return v, true, nil
-	case errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "no such table"):
-		return "", false, nil
-	default:
-		return "", false, archiveFailure("read archive metadata", err)
+	v, found, err := readMetadata(ctx, db, key)
+	if errors.Is(err, ErrInvalidArchive) {
+		return v, found, err
 	}
+	if err != nil && strings.Contains(err.Error(), "no such table") {
+		return "", false, nil
+	}
+	return v, found, archiveFailure("read archive metadata", err)
+}
+
+// readMetadata applies the same UTF-8 byte and NUL rules as SetMeta, including
+// to values written by other applications. SQLite measures BLOB casts in the
+// database encoding. A valid value needs at most twice the UTF-8 limit in UTF-16,
+// so SQL bounds the encoded projection at that size before Go allocation. UTF-16
+// conversion expands by at most 3/2, bounding the Go string at three times the
+// limit; the final length check enforces the original UTF-8 byte limit.
+// Materialization keeps a legacy view's guard and projection on the same value.
+func readMetadata(ctx context.Context, db *sql.DB, key string) (string, bool, error) {
+	var value sql.NullString
+	var size sql.NullInt64
+	if err := db.QueryRowContext(ctx, qryMetaGet, key, 2*MaxMetadataValueBytes).Scan(&value, &size); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	if !value.Valid || !size.Valid || size.Int64 > 2*MaxMetadataValueBytes || len(value.String) > MaxMetadataValueBytes || strings.IndexByte(value.String, 0) >= 0 {
+		return "", false, fmt.Errorf("%w: metadata value exceeds %d bytes, contains NUL, or is null", ErrInvalidArchive, MaxMetadataValueBytes)
+	}
+	return value.String, true, nil
 }
 
 func validateMetadataKey(key string) error {
@@ -532,13 +553,14 @@ func (s *Store) PressureTendency(ctx context.Context, windowSeconds int64) (*Pre
 
 // DayStat is one calendar day of aggregates, in US display units.
 type DayStat struct {
-	Day         string   `json:"day"` // YYYY-MM-DD, local time
-	TempMinF    *float64 `json:"temp_min_f,omitempty"`
-	TempMaxF    *float64 `json:"temp_max_f,omitempty"`
-	TempAvgF    *float64 `json:"temp_avg_f,omitempty"`
-	RainIn      float64  `json:"rain_in"`
-	PeakGustMph *float64 `json:"peak_gust_mph,omitempty"`
-	Obs         int64    `json:"obs"`
+	Day          string   `json:"day"` // YYYY-MM-DD, local time
+	TempMinF     *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF     *float64 `json:"temp_max_f,omitempty"`
+	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
+	RainIn       *float64 `json:"rain_in"`
+	RainReadings int64    `json:"rain_readings"`
+	PeakGustMph  *float64 `json:"peak_gust_mph,omitempty"`
+	Obs          int64    `json:"obs"`
 }
 
 // dayAgg is one local calendar day of raw SI aggregates: the intermediate the
@@ -609,7 +631,7 @@ func (s *Store) dayAggregates(ctx context.Context, startEpoch, endEpoch int64) (
 
 // dayStat converts a raw SI day aggregate to display units.
 func dayStat(d dayAgg) DayStat {
-	ds := DayStat{Day: d.day.Format("2006-01-02"), RainIn: model.MmToInch(d.rainMm), Obs: d.obs}
+	ds := DayStat{Day: d.day.Format("2006-01-02"), RainIn: rainTotalIn(d.rainMm, d.rainN), RainReadings: d.rainN, Obs: d.obs}
 	if d.tempMin != nil {
 		v := model.CToF(*d.tempMin)
 		ds.TempMinF = &v
@@ -909,4 +931,13 @@ func (s *Store) Records(ctx context.Context) (Records, error) {
 // reports.
 func localTime(epoch int64) string {
 	return time.Unix(epoch, 0).Local().Format(time.RFC3339)
+}
+
+// rainTotalIn preserves missing rain while retaining available partial sums.
+func rainTotalIn(mm float64, readings int64) *float64 {
+	if readings == 0 {
+		return nil
+	}
+	v := model.MmToInch(mm)
+	return &v
 }

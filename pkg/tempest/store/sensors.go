@@ -453,8 +453,9 @@ type ComfortStats struct {
 // over [startEpoch, endEpoch]: the hottest and coldest "feels like" and the
 // muggiest day. It works from 15-minute bucket means, so the temperature,
 // humidity, and wind feeding each feels-like reading belong to the same quarter
-// hour rather than being averaged across the whole day. Heat index requires
-// humidity, wind chill requires wind, and mild air uses temperature alone.
+// hour rather than being averaged across the whole day. Heat index and dew point
+// use means of complete temperature/humidity pairs; wind chill uses complete
+// temperature/wind pairs. Mild air uses the mean of all available temperatures.
 func (s *Store) ComfortStatistics(ctx context.Context, startEpoch, endEpoch int64) (ComfortStats, error) {
 	days, err := s.comfortDays(ctx, startEpoch, endEpoch)
 	if err != nil {
@@ -499,9 +500,9 @@ func (s *Store) comfortDays(ctx context.Context, startEpoch, endEpoch int64) (_ 
 
 	var out []comfortDay
 	for rows.Next() {
-		var b, tempN int64
-		var tempC, hum, wind sql.NullFloat64
-		if err := rows.Scan(&b, &tempC, &hum, &wind, &tempN); err != nil {
+		var b int64
+		var tempC, humidTempC, hum, windTempC, wind sql.NullFloat64
+		if err := rows.Scan(&b, &tempC, &humidTempC, &hum, &windTempC, &wind); err != nil {
 			return nil, archiveFailure("scan comfort day", err)
 		}
 		if !tempC.Valid {
@@ -514,26 +515,30 @@ func (s *Store) comfortDays(ctx context.Context, startEpoch, endEpoch int64) (_ 
 		}
 		cur := &out[len(out)-1]
 
-		tF := model.CToF(tempC.Float64)
-		// Match current_conditions: missing inputs cannot stand in for measured
-		// zero humidity or calm wind. Mild air needs neither additional sensor.
-		var feels *float64
-		switch {
-		case tF >= 80 && hum.Valid:
-			feels = new(model.ApparentTempF(tF, hum.Float64, 0))
-		case tF <= 50 && wind.Valid:
-			feels = new(model.ApparentTempF(tF, 0, model.MpsToMph(wind.Float64)))
-		case tF > 50 && tF < 80:
-			feels = &tF
+		addFeels := func(feels float64) {
+			cur.hottestFeels = maxPtr(cur.hottestFeels, &feels)
+			cur.coldestFeels = minPtr(cur.coldestFeels, &feels)
 		}
-		cur.hottestFeels = maxPtr(cur.hottestFeels, feels)
-		cur.coldestFeels = minPtr(cur.coldestFeels, feels)
-
-		if hum.Valid {
-			if dpC := model.DewPointC(tempC.Float64, hum.Float64); !math.IsNaN(dpC) {
+		// Each derived metric uses the temperature mean of its own complete
+		// pairs. Unpaired sensor samples cannot change either input.
+		if humidTempC.Valid && hum.Valid {
+			tF := model.CToF(humidTempC.Float64)
+			if tF >= 80 {
+				addFeels(model.ApparentTempF(tF, hum.Float64, 0))
+			}
+			if dpC := model.DewPointC(humidTempC.Float64, hum.Float64); !math.IsNaN(dpC) {
 				dpF := model.CToF(dpC)
 				cur.maxDewPoint = maxPtr(cur.maxDewPoint, &dpF)
 			}
+		}
+		if windTempC.Valid && wind.Valid {
+			tF := model.CToF(windTempC.Float64)
+			if tF <= 50 {
+				addFeels(model.ApparentTempF(tF, 0, model.MpsToMph(wind.Float64)))
+			}
+		}
+		if tF := model.CToF(tempC.Float64); tF > 50 && tF < 80 {
+			addFeels(tF)
 		}
 	}
 	return out, archiveFailure("read comfort days", rows.Err())

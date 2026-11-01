@@ -735,6 +735,7 @@ type StationObs struct {
 }
 
 // LatestStationObs fetches the most recent observation for a station (SI units).
+// The first response row wins when multiple observations share the newest timestamp.
 func (c *Client) LatestStationObs(ctx context.Context, stationID int) (*StationObs, error) {
 	if stationID <= 0 {
 		return nil, fmt.Errorf("%w: station id must be positive", ErrInvalidArgument)
@@ -760,7 +761,13 @@ func (c *Client) LatestStationObs(ctx context.Context, stationID int) (*StationO
 	if err := c.get(ctx, path, siUnits(), &out, validate); err != nil {
 		return nil, err
 	}
-	return &out.Obs[len(out.Obs)-1], nil
+	latest := 0
+	for index := 1; index < len(out.Obs); index++ {
+		if out.Obs[index].Timestamp > out.Obs[latest].Timestamp {
+			latest = index
+		}
+	}
+	return &out.Obs[latest], nil
 }
 
 func validateStationObs(observation StationObs) error {

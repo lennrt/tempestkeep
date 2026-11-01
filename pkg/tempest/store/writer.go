@@ -366,15 +366,11 @@ func (w *Writer) Meta(ctx context.Context, key string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	var v string
-	switch err := db.QueryRowContext(ctx, qryMetaGet, key).Scan(&v); {
-	case err == nil:
-		return v, true, nil
-	case errors.Is(err, sql.ErrNoRows):
-		return "", false, nil
-	default:
-		return "", false, archiveFailure("read writer metadata", err)
+	v, found, err := readMetadata(ctx, db, key)
+	if errors.Is(err, ErrInvalidArchive) {
+		return v, found, err
 	}
+	return v, found, archiveFailure("read writer metadata", err)
 }
 
 // SetMeta upserts a key/value pair into the meta table.

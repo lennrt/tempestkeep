@@ -100,7 +100,7 @@ func TestThisDay(t *testing.T) {
 	if got[0].Year != 2022 || got[1].Year != 2023 || got[2].Year != 2024 {
 		t.Errorf("years = %d,%d,%d, want 2022,2023,2024", got[0].Year, got[1].Year, got[2].Year)
 	}
-	if !almost(got[0].RainIn, 1.0) {
+	if !almost(*got[0].RainIn, 1.0) {
 		t.Errorf("2022 rain = %v in, want 1.0", got[0].RainIn)
 	}
 	if got[1].TempMaxF == nil || !almost(*got[1].TempMaxF, model.CToF(27)) {
@@ -147,7 +147,7 @@ func TestPeriodSummaryByMonth(t *testing.T) {
 	if mar.DaysObserved != 2 || mar.RainyDays != 1 {
 		t.Errorf("march days = %d rainy = %d, want 2 and 1", mar.DaysObserved, mar.RainyDays)
 	}
-	if !almost(mar.RainIn, model.MmToInch(12.8)) {
+	if !almost(*mar.RainIn, model.MmToInch(12.8)) {
 		t.Errorf("march rain = %v, want %v", mar.RainIn, model.MmToInch(12.8))
 	}
 	// True mean over observations: (10+20)/2 = 15°C.
@@ -243,7 +243,7 @@ func TestMonthlyNormals(t *testing.T) {
 	}
 	// Only 2023 January had rain (1 in over 1 rainy day); averaged over 2 years
 	// the normal is 0.5 in and 0.5 rainy days.
-	if !almost(jan.AvgRainIn, 0.5) || !almost(jan.AvgRainyDays, 0.5) {
+	if !almost(*jan.AvgRainIn, 0.5) || !almost(*jan.AvgRainyDays, 0.5) {
 		t.Errorf("jan rain normal = %v in / %v rainy days, want 0.5 / 0.5", jan.AvgRainIn, jan.AvgRainyDays)
 	}
 	if got[1].Month != 7 {

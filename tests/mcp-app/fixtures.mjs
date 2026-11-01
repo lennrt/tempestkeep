@@ -89,6 +89,10 @@ export const fixtures = {
   wind: { tool: 'wind_rose', args: { start: day(0), end: day(13) }, data: wind },
   stations: { tool: 'list_stations', args: {}, data: stations },
   rain: { tool: 'rain_stats', args: { start: day(0), end: day(2) }, data: rainSummary },
+  normals: { tool: 'climate_normals', args: {}, data: { months: [
+    { month: 1, month_name: 'January', years: 2, temp_avg_f: 40, rain_years: 0, avg_rain_in: null, avg_rainy_days: null },
+    { month: 2, month_name: 'February', years: 3, temp_avg_f: 45, rain_years: 1, avg_rain_in: 1.5, avg_rainy_days: 1 },
+  ] } },
   conditions: { tool: 'current_conditions', args: {}, data: { source: 'archive', time: observations.points[30].time, age_seconds: 900, temp_f: 72.4, humidity_pct: 0, rain_today_in: 0, wind_mph: 4.6, gust_mph: 8.2, note: 'Synthetic archive fallback.' } },
 };
 

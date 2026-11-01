@@ -65,7 +65,16 @@ controls survive a refresh that temporarily returns no devices.
 
 The view displays at most 2,000 rows and 64 columns per table. It reports when
 these display limits omit data. The original structured tool result remains
-available to the host. Long cell text is also bounded in the display.
+available to the host. Cell previews contain at most 2,048 characters. SQL text search and the cell
+inspector cover at most 65,536 characters per cell. A notice identifies longer
+values. Open a long cell to inspect its text in a modal dialog. Scroll with
+the keyboard, then press Escape or use Close to return focus to its button.
+Values remain text, including HTML-like strings.
+
+Daily forecast cards show daily high, low, and maximum rain probability. Missing
+values remain unavailable and measured zero stays zero. Switching to hourly
+forecasts restores hourly summary labels. Dataset selection keeps keyboard
+focus on the selected control after rendering. Initial results do not steal focus.
 
 If a result is truncated, narrow its dates, reduce its selected columns, or use
 an aggregate query. The truncation notice remains visible during table
@@ -82,6 +91,11 @@ measured zero. If a count is below `obs`, the total covers only some samples.
 The view reports missing and partial buckets, and keeps their counts in the table.
 These counts describe samples, not continuous sensor uptime. Original tool
 results remain intact. Older results without counts retain their existing display.
+
+Historical daily, month/year, and this-day views retain missing rain as `—`.
+Their tables include `rain_readings` beside observation counts. Climate normals
+show `rain_years` and explain that partial months can contribute available totals.
+These counts do not establish complete calendar coverage.
 
 The Rainfall patterns view for `rain_stats` keeps rainfall as its headline even
 when no measurement is available. It shows missing rainfall and unavailable
@@ -199,9 +213,12 @@ npm run app:screenshots
 ```
 
 Playwright captures the embedded app in the local synthetic test host. The
-generated files are [the weather preview](screenshots/mcp-app-weather.png) and
-[the table preview](screenshots/mcp-app-table.png). Inspect both images before
-committing them with a UI change.
+generated files show [weather charts](screenshots/mcp-app-weather.png),
+[SQL tables](screenshots/mcp-app-table.png),
+[daily forecasts](screenshots/mcp-app-forecast.png), and
+[station devices](screenshots/mcp-app-devices.png). Inspect each image before
+committing it with a UI change. The Devices example filters by a synthetic station
+name and keeps the parent station beside every device.
 
 These screenshots show fixture data and the app's layout. They are not captures
 of a production station or evidence of compatibility with a named third-party
