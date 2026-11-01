@@ -12,7 +12,7 @@ Do not put sensitive station data in either channel.
    [docs/README.md](docs/README.md).
 2. Read the [troubleshooting guide](docs/troubleshooting.md) for known recovery steps.
 3. Run `tempestkeep help <command>` or inspect the MCP tool description.
-4. Reproduce the problem with the default branch and Go 1.27.2 when practical.
+4. Reproduce the problem with the default branch and Go 1.27.3 when practical.
 5. Run the smallest relevant check from [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Include

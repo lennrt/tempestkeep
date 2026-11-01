@@ -9,7 +9,7 @@ remains disabled until a separate reviewed change enables an approved release.
 - Obtain explicit release approval.
 - Select one reviewed commit with a clean working tree.
 - Require all configured GitHub checks to pass for that commit.
-- Use Go 1.27.2.
+- Use Go 1.27.3.
 - Confirm that no credential, station data, archive, export, personal path, or
   raw API response is present in tracked, untracked, ignored, or generated
   files.
@@ -29,7 +29,7 @@ Choose a semantic version. Do not reuse or move a published tag.
 
 Use `vMAJOR.MINOR.PATCH` for release tags and the corresponding SemVer version
 for artifacts. Development snapshots retain the exact source commit as their
-unique identifier; `v0.4.0-dev` alone does not identify a source revision.
+unique identifier; `v0.5.0-dev` alone does not identify a source revision.
 
 Update [CHANGELOG.md](CHANGELOG.md) with a human-readable account of changes,
 compatibility effects, and upgrade instructions. Include every publicly known
@@ -48,7 +48,7 @@ make integration e2e
 make release-check
 ```
 
-The Go version must be exactly 1.27.2. The first three commands must pass. The
+The Go version must be exactly 1.27.3. The first three commands must pass. The
 last command creates local snapshot archives in `dist/` without publishing them.
 
 Inspect every archive. Confirm that it contains the `tempestkeep` binary,

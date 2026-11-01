@@ -6,7 +6,7 @@ one device.
 
 ## Build
 
-Use Go 1.27.2 from the repository root:
+Use Go 1.27.3 from the repository root:
 
 ```sh
 make tempestkeep
@@ -24,6 +24,7 @@ tempestkeep list-devices   List station and device data visible to the token.
 tempestkeep collect        Create or update one device archive.
 tempestkeep now            Show live or archived current conditions.
 tempestkeep explore        Browse archive periods and records.
+tempestkeep status         Inspect archive freshness and internal gaps.
 tempestkeep stats          Print an archive report.
 tempestkeep export         Write CSV or JSON Lines.
 tempestkeep mcp            Serve live and archived data over MCP stdio.
@@ -75,6 +76,20 @@ CLI collection or MCP with `--device-id` or `TEMPEST_DEVICE_ID`. For MCP, this
 also sets the default live station; explicit tool station arguments can override
 individual reads. See the [MCP selection rules](../../docs/mcp.md#capabilities).
 
+## Archive status
+
+Run `bin/tempestkeep status --db ./tempest.sqlite` without a token or network.
+Use `--format json` for structured output. Only `text` and `json` are accepted.
+The command opens an existing archive read-only and does not create a missing file.
+
+The report includes observation count, first and last local RFC3339 timestamps,
+newest age in seconds, and the saved backfill completion marker. An empty archive
+returns null timestamps and age in JSON. Fresh means an age from 0 through
+3,599 seconds. Future observations are not fresh. The report lists at most ten
+largest internal gaps strictly over 3,600 seconds. It does not include gaps
+before the first observation or after the last observation. These bounds and
+sample counts do not establish continuous coverage or sensor availability.
+
 ## Collection
 
 After setup, run:
@@ -82,6 +97,14 @@ After setup, run:
 ```sh
 bin/tempestkeep collect
 ```
+
+Without `--device-id` or a nonempty `TEMPEST_DEVICE_ID`, collection reuses
+the device of an existing archive. A new or empty archive discovers the first
+accessible Tempest device. An unidentifiable legacy archive requires an explicit
+selector. Archive read errors do not fall back to discovery. Explicit selectors
+must be positive. Zero, malformed, or negative values fail before archive or API
+access. A positive flag overrides the environment. Selecting a different device
+still fails the archive ownership check.
 
 On a new archive, the command walks backward through available history. An
 interrupted backward walk resumes on the next run. Once backfill completes,
@@ -137,6 +160,12 @@ After successful collection, the command checkpoints SQLite's write-ahead log
 (WAL), which holds recent database changes. It then closes the writer and makes
 a backup. Backups live in `backups` beside the archive, not necessarily beside
 the executable or working directory.
+
+New snapshot names use `<archive-stem>-YYYYMMDD-HHMMSS.nnnnnnnnn.sqlite` in UTC.
+A collision advances the candidate timestamp by one nanosecond, with at most
+100 candidates. Existing snapshots are never replaced. Retention recognizes
+both this format and legacy second-resolution names, ordered by parsed time.
+Unrelated files remain untouched.
 
 The default retention is seven snapshots. `--backup-keep` accepts 0 through
 365, and zero disables backups. `--no-backup` skips the snapshot for that run.

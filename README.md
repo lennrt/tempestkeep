@@ -36,8 +36,9 @@ credentials described below.
 
 | Explore | In the app |
 |---|---|
+| Daily forecast | Read daily high, low, and maximum rain probability, then switch to hourly details. |
 | Weather over time | Switch metrics, inspect chart points with pointer, touch, or keyboard, and explore the wind rose. |
-| Archive and SQL results | Search rows, sort columns, and move between table pages. |
+| Archive and SQL results | Search rows, inspect long cells, sort columns, and move between table pages. |
 | Updated results | Refresh the same read-only tool with its original arguments. |
 | Your working environment | Use responsive views that follow the host's light or dark theme. |
 
@@ -94,7 +95,7 @@ See the [MCP guide](docs/mcp.md) for configuration, capabilities, and limits.
 
 ### Build
 
-You need Go 1.27.2 and a local filesystem for SQLite. Live data and collection
+You need Go 1.27.3 and a local filesystem for SQLite. Live data and collection
 also need a WeatherFlow personal access token. The build commands below use
 `make` and a Unix-like shell. The normal build uses pure Go. Race tests need
 a C toolchain.
@@ -229,6 +230,7 @@ tempestkeep list-devices   List stations and device identifiers.
 tempestkeep collect        Create or update the archive.
 tempestkeep now            Show current conditions and forecast.
 tempestkeep explore        Explore archived days, months, and records.
+tempestkeep status         Inspect archive freshness and internal gaps.
 tempestkeep stats          Print archive statistics.
 tempestkeep export         Write CSV or JSON Lines to stdout.
 tempestkeep mcp            Serve live and archived data over MCP stdio.
@@ -254,9 +256,9 @@ cycles the month/year metric. The `g` or Home key returns to the latest period.
 The `q`, Esc, and Ctrl+C keys exit either dashboard.
 
 `tempestkeep version` reports the build's injected version, then Go's module
-version when available. If neither exists, it falls back to `v0.4.0-dev`.
+version when available. If neither exists, it falls back to `v0.5.0-dev`.
 `make build` injects a version from Git tags or that development fallback.
-Version 0.4.0 is the proposed next minor release. See [CHANGELOG.md](CHANGELOG.md)
+Version 0.5.0 is the proposed next minor release. See [CHANGELOG.md](CHANGELOG.md)
 for its scope. This change does not publish a release.
 
 ## Archive behavior
@@ -269,6 +271,14 @@ Collection requests at most five days per API call. Each chunk is committed in
 one transaction. Observation inserts use the `(device_id, epoch)` key, so replay
 does not create duplicate rows. Open-ended collection stores a cursor after each
 committed chunk and resumes from that cursor after interruption.
+
+Without an explicit device selection, CLI collection reuses an existing
+archive's device. New or empty archives discover the first accessible Tempest
+device. Explicit zero device IDs fail before archive or API access.
+
+Use `tempestkeep status --format json` to inspect an archive without a token.
+It reports freshness, saved backfill state, and up to ten internal gaps over
+one hour. Sample timestamps do not establish continuous sensor coverage.
 
 The default `tempestkeep collect` run creates a timestamped backup after a
 successful checkpoint. Backups live in the `backups` directory beside the
@@ -309,7 +319,7 @@ See [SECURITY.md](SECURITY.md) for private reporting and the
 
 ## Verification
 
-Run the repository checks with Go 1.27.2:
+Run the repository checks with Go 1.27.3:
 
 ```sh
 make fmtcheck       # gofmt and goimports
@@ -397,7 +407,7 @@ Tempest names and marks belong to their respective owners. See [NOTICE.md](NOTIC
 
 TempestKeep uses the MIT License. See [LICENSE](LICENSE).
 
-[version-badge]: https://img.shields.io/badge/development-v0.4.0--dev-blue
+[version-badge]: https://img.shields.io/badge/development-v0.5.0--dev-blue
 [ci-b]: https://img.shields.io/github/actions/workflow/status/lennrt/tempestkeep/ci.yml?branch=main
 [ci]: https://github.com/lennrt/tempestkeep/actions/workflows/ci.yml
 [license-badge]: https://img.shields.io/github/license/lennrt/tempestkeep

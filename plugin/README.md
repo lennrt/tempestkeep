@@ -10,7 +10,7 @@ the [MCP Apps guide](../docs/mcp-apps.md).
 
 ## Prepare the server
 
-Build `tempestkeep` from the repository root with Go 1.27.2:
+Build `tempestkeep` from the repository root with Go 1.27.3:
 
 ```sh
 make tempestkeep

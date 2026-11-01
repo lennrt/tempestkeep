@@ -18,7 +18,7 @@ review; do not submit only a final source archive.
 
 ## Prerequisites
 
-- Go 1.27.2.
+- Go 1.27.3.
 - A Unix-like shell and make for the Makefile and shell scripts.
 - A C toolchain for race tests.
 - Network access to the Go module proxy for the first tool download.

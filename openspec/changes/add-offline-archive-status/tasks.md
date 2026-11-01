@@ -5,7 +5,7 @@
 
 ## Verification
 
-- [ ] Run focused CLI tests, full make verify, and strict specification validation.
+- [x] Run focused CLI tests, full make verify, and strict specification validation.
 - [x] Obtain independent integrated review and record remaining limitations.
 
 Independent review reproduced a 16 MiB metadata allocation. A shared reader fix
@@ -16,3 +16,6 @@ Status mutation checks killed 25 of 28 variants. Three survivors are equivalent
 under shared coverage-extrema validity and RFC3339 subsecond formatting. The
 tool counts any nonzero test exit or timeout as killed; no separate compilation
 failure count is available. Measured status-function CRAP scores are below 10.
+
+Final integrated `make verify` passed on Go 1.27.3 on 2026-11-01. The pinned patch
+also passed the vulnerability scan after Go 1.27.2 reported GO-2026-6809.

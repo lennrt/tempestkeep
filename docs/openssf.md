@@ -42,7 +42,7 @@ another project's copied answers. Recheck time-dependent claims on each update.
 
 ## Reproduce the engineering evidence
 
-Use Go 1.27.2 and a C toolchain for race checks. No live WeatherFlow token is
+Use Go 1.27.3 and a C toolchain for race checks. No live WeatherFlow token is
 needed:
 
 ```sh

@@ -1,6 +1,6 @@
 # Architecture
 
-TempestKeep builds one Go 1.27.2 command over one shared core:
+TempestKeep builds one Go 1.27.3 command over one shared core:
 
 - `tempestkeep` owns setup, collection, export, reports, and terminal views.
 - `tempestkeep mcp` exposes live and archived data over MCP stdio.
@@ -103,6 +103,10 @@ the same ID. This rule prevents mixed-device aggregates.
 create or migrate a file. Both handles reject symlinks and file replacement
 during open.
 
+Metadata readers enforce the writer's existing 4,096-byte and NUL limits.
+SQL excludes oversized values before the driver creates a Go string. Oversized,
+null, or NUL-containing metadata returns `ErrInvalidArchive`.
+
 The read-only SQL operation accepts one `SELECT` or `WITH ... SELECT`. It also
 uses SQLite `query_only`. It limits query bytes, execution time, columns, rows,
 and returned bytes. Connection-level limits restrict large SQLite expressions
@@ -125,8 +129,10 @@ writer, so other writers must remain stopped through that copy.
 
 The CLI copies the database to an owner-only temporary file, syncs it, and
 closes it. A filesystem hard link publishes the snapshot without replacing an
-existing file. Rotation recognizes the exact timestamped filename format and
-preserves unrelated files. Backups live beside the archive in `backups`.
+existing file. New names include nine fractional second digits in UTC. Publication tries at
+most 100 nanosecond candidates without replacing existing files. Rotation
+recognizes both new names and legacy second-resolution names, orders parsed
+timestamps, and preserves unrelated files. Backups live beside the archive in `backups`.
 
 ## Time and units
 
