@@ -41,7 +41,7 @@ func cmdCollect(args []string) error {
 		"tempestkeep collect --start 2025-06-01 --end 2025-06-30   # repair an older gap",
 		"tempestkeep collect --quiet   # for cron; progress off, errors still print")
 	db := fs.String("db", "", "archive path (or env TEMPEST_DB; default ./tempest.sqlite)")
-	deviceID := fs.Int("device-id", 0, "Tempest device id (or env TEMPEST_DEVICE_ID; auto-discovered if unset)")
+	deviceID := fs.Int("device-id", 0, "positive Tempest device id (or env TEMPEST_DEVICE_ID; archive device or discovery if unset)")
 	backfillStart := fs.String("backfill-start", "", "earliest date to backfill on a fresh archive, YYYY-MM-DD (default: walk back until history ends)")
 	start := fs.String("start", "", "first local date to repair, YYYY-MM-DD (requires --end; at most 366 calendar days)")
 	end := fs.String("end", "", "last local date to repair, YYYY-MM-DD inclusive (requires --start; no future dates)")
@@ -55,6 +55,9 @@ func cmdCollect(args []string) error {
 	}
 	setFlags := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { setFlags[f.Name] = true })
+	if setFlags["device-id"] && *deviceID <= 0 {
+		return usagef("--device-id must be positive")
+	}
 	explicitRange := setFlags["start"] || setFlags["end"]
 	var rangeStart, rangeEnd int64
 	if explicitRange {
@@ -143,20 +146,9 @@ func cmdCollect(args []string) error {
 		return err
 	}
 
-	dev := *deviceID
-	if dev == 0 {
-		if e := os.Getenv("TEMPEST_DEVICE_ID"); e != "" {
-			// A malformed value must not silently fall through to discovery,
-			// which could pick a different device and split the archive.
-			n, perr := strconv.Atoi(e)
-			if perr != nil {
-				return fmt.Errorf("TEMPEST_DEVICE_ID must be an integer")
-			}
-			dev = n
-		}
-	}
-	if dev < 0 {
-		return fmt.Errorf("TEMPEST_DEVICE_ID must be positive")
+	dev, err := collectionDevice(ctx, *deviceID, os.Getenv("TEMPEST_DEVICE_ID"), dbPath)
+	if err != nil {
+		return err
 	}
 	if dev == 0 {
 		_, discovered, err := client.FindTempestDevice(ctx)
@@ -249,6 +241,68 @@ func cmdCollect(args []string) error {
 		}
 	}
 	return nil
+}
+
+// collectionDevice resolves configured selectors before inspecting an existing
+// archive read-only. Zero means discovery is needed; inspection never creates it.
+func collectionDevice(ctx context.Context, explicit int, environment, path string) (int, error) {
+	if explicit > 0 {
+		return explicit, nil
+	}
+	if environment != "" {
+		device, err := strconv.Atoi(environment)
+		if err != nil || device <= 0 {
+			return 0, errors.New("TEMPEST_DEVICE_ID must be a positive integer")
+		}
+		return device, nil
+	}
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	} else if err != nil {
+		return 0, errors.New("cannot inspect collection archive")
+	}
+	return existingCollectionDevice(ctx, path)
+}
+
+func existingCollectionDevice(ctx context.Context, path string) (_ int, err error) {
+	s, err := store.Open(ctx, path)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { err = errors.Join(err, s.Close()) }()
+	// Bound stored metadata before loading it; legacy archives may lack meta.
+	meta, err := s.Query(ctx, "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'meta'", 1)
+	if err != nil {
+		return 0, err
+	}
+	if len(meta.Rows) != 0 {
+		binding, err := s.Query(ctx, "SELECT CASE WHEN length(CAST(value AS BLOB)) <= 32 THEN value ELSE NULL END FROM meta WHERE key = 'archive_device_id' LIMIT 1", 1)
+		if err != nil {
+			return 0, err
+		}
+		if len(binding.Rows) != 0 {
+			raw, ok := binding.Rows[0][0].(string)
+			device, parseErr := strconv.Atoi(raw)
+			if !ok || parseErr != nil || device <= 0 {
+				return 0, fmt.Errorf("%w: archive has invalid device metadata", store.ErrInvalidArchive)
+			}
+			return device, nil
+		}
+	}
+	// Store.Open already rejects mixed device IDs. Query only one value,
+	// including for old archives that predate persisted device binding.
+	rows, err := s.Query(ctx, "SELECT device_id FROM obs_st LIMIT 1", 1)
+	if err != nil {
+		return 0, errors.Join(errors.New("cannot infer archive device; supply --device-id explicitly for legacy archives"), err)
+	}
+	if len(rows.Rows) == 0 {
+		return 0, nil
+	}
+	device, ok := rows.Rows[0][0].(int64)
+	if !ok || device <= 0 || int64(int(device)) != device {
+		return 0, fmt.Errorf("%w: archive has invalid device identity", store.ErrInvalidArchive)
+	}
+	return int(device), nil
 }
 
 // explicitCollectionRange validates local calendar bounds before configuration,
@@ -389,6 +443,10 @@ func span(c store.Coverage) string {
 // snapshot copies the archive into ./backups with a UTC timestamp and prunes all
 // but the newest keep snapshots. keep <= 0 disables snapshots.
 func snapshot(dbPath string, keep int) (string, error) {
+	return snapshotAt(dbPath, keep, time.Now())
+}
+
+func snapshotAt(dbPath string, keep int, now time.Time) (string, error) {
 	if keep <= 0 {
 		return "", nil
 	}
@@ -407,12 +465,31 @@ func snapshot(dbPath string, keep int) (string, error) {
 		return "", err
 	}
 	stem := stem(filepath.Base(dbPath))
-	stamp := time.Now().UTC().Format("20060102-150405")
-	dest := filepath.Join(dir, fmt.Sprintf("%s-%s.sqlite", stem, stamp))
-	if err := copyFile(dbPath, dest); err != nil {
-		return "", err
+	// Advance only the candidate name on collision. Publication still uses a
+	// hard link, so even concurrent creators cannot replace another snapshot.
+	for attempt := range 100 {
+		stamp := now.UTC().Add(time.Duration(attempt)).Format(backupTimestampLayout)
+		dest := filepath.Join(dir, fmt.Sprintf("%s-%s.sqlite", stem, stamp))
+		if err := copyFile(dbPath, dest); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
+			return "", err
+		}
+		return dest, pruneBackups(dir, stem, keep)
 	}
-	return dest, pruneBackups(dir, stem, keep)
+	return "", errors.New("backup name collision limit reached")
+}
+
+const backupTimestampLayout = "20060102-150405.000000000"
+
+func backupTimestamp(stamp string) (time.Time, bool) {
+	for _, layout := range []string{backupTimestampLayout, "20060102-150405"} {
+		if instant, err := time.Parse(layout, stamp); err == nil && instant.Format(layout) == stamp {
+			return instant, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func pruneBackups(dir, stem string, keep int) (err error) {
@@ -432,24 +509,33 @@ func pruneBackups(dir, stem string, keep int) (err error) {
 		return fmt.Errorf("backup directory exceeds %d entries", maxBackupEntries)
 	}
 	prefix := stem + "-"
-	var names []string
+	type backup struct {
+		name    string
+		instant time.Time
+	}
+	var backups []backup
 	for _, entry := range entries {
 		name := entry.Name()
 		if !entry.Type().IsRegular() || !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".sqlite") {
 			continue
 		}
 		stamp := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".sqlite")
-		if _, err := time.Parse("20060102-150405", stamp); err == nil {
-			names = append(names, name)
+		if instant, ok := backupTimestamp(stamp); ok {
+			backups = append(backups, backup{name: name, instant: instant})
 		}
 	}
-	if len(names) <= keep {
+	if len(backups) <= keep {
 		return nil
 	}
-	sort.Strings(names)
+	sort.Slice(backups, func(i, j int) bool {
+		if backups[i].instant.Equal(backups[j].instant) {
+			return backups[i].name < backups[j].name
+		}
+		return backups[i].instant.Before(backups[j].instant)
+	})
 	var removeErrors []error
-	for _, name := range names[:len(names)-keep] {
-		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	for _, backup := range backups[:len(backups)-keep] {
+		if err := os.Remove(filepath.Join(dir, backup.name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			removeErrors = append(removeErrors, err)
 		}
 	}
