@@ -213,9 +213,12 @@ npm run app:screenshots
 ```
 
 Playwright captures the embedded app in the local synthetic test host. The
-generated files are [the weather preview](screenshots/mcp-app-weather.png) and
-[the table preview](screenshots/mcp-app-table.png). Inspect both images before
-committing them with a UI change.
+generated files show [weather charts](screenshots/mcp-app-weather.png),
+[SQL tables](screenshots/mcp-app-table.png),
+[daily forecasts](screenshots/mcp-app-forecast.png), and
+[station devices](screenshots/mcp-app-devices.png). Inspect each image before
+committing it with a UI change. The Devices example filters by a synthetic station
+name and keeps the parent station beside every device.
 
 These screenshots show fixture data and the app's layout. They are not captures
 of a production station or evidence of compatibility with a named third-party

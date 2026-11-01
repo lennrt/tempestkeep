@@ -99,9 +99,10 @@ bin/tempestkeep collect
 ```
 
 Without `--device-id` or a nonempty `TEMPEST_DEVICE_ID`, collection reuses
-the device of an existing archive. A new or empty archive discovers the first
-accessible Tempest device. An unidentifiable legacy archive requires an explicit
-selector. Archive read errors do not fall back to discovery. Explicit selectors
+the device of an existing archive. A new archive or an empty archive without a
+saved device discovers the first accessible Tempest device. An empty archive with
+a saved device keeps that device. An unidentifiable legacy archive requires an
+explicit selector. Archive read errors do not fall back to discovery. Explicit selectors
 must be positive. Zero, malformed, or negative values fail before archive or API
 access. A positive flag overrides the environment. Selecting a different device
 still fails the archive ownership check.
@@ -202,6 +203,10 @@ Use Left/Right to move between periods. Use `d/w/m/y/r` to select a view.
 Use Tab to change the month or year metric. Use Up/Down and Page Up/Page Down to scroll.
 Press `q`, Esc, or Ctrl+C to exit. See the [terminal controls](../../README.md#terminal-controls)
 for refresh keys and minimum widths.
+
+In the day view, missing rain readings leave gaps in the sparkline. The lowest
+block represents zero or a small positive reading. Summary totals use `≥` when
+some stored observations lack rain readings. These counts do not establish continuous coverage.
 
 Color is disabled when stdout is not a terminal. `NO_COLOR`, `TERM=dumb`, and
 `--no-color` also disable color. `stats` and `export` provide output that does

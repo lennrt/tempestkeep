@@ -8,6 +8,7 @@ This development batch contains ten improvements:
    comfort calculations, so unrelated samples cannot create apparent extremes.
 2. Preserve missing historical rainfall as null, expose sample counts, and
    average rain normals over rain-contributing months with `rain_years`.
+   Keep missing rain buckets as gaps in the terminal day chart.
 3. Create distinct nanosecond backup names, retry bounded collisions, and
    retain both legacy and new names in chronological order.
 4. Select the newest accepted live observation by timestamp, independent of
@@ -43,7 +44,8 @@ than the first accessible live device. Nonempty zero environment selectors fail
 for CLI collection. MCP retains its automatic zero environment selection rule.
 Existing archives need no schema migration. Backup naming changes, while
 retention continues to recognize legacy names. Dependencies remain unchanged.
-Metadata reads now enforce the writer's existing 4,096-byte and NUL limits.
+Metadata reads now enforce the writer's existing 4,096-byte and NUL limits
+in UTF-8 bytes, including when SQLite stores text as UTF-16.
 Oversized, null, or NUL-containing stored values return `ErrInvalidArchive`.
 
 Active development, plugin, and app metadata target 0.5.0. Untagged fallback

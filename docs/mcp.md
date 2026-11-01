@@ -76,7 +76,8 @@ Without a selection, the server uses the first
 accessible Tempest device. The archive rejects writes for a different device.
 
 CLI `collect` has a different automatic rule: it reuses an existing archive's
-device. New or empty archives discover the first accessible Tempest device.
+device. New archives and empty archives without a saved device discover the first
+accessible Tempest device. An empty archive with a saved device keeps that device.
 Use an explicit positive selector when an old archive has no usable identity.
 MCP keeps its lazy live selection rule described above.
 

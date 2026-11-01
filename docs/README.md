@@ -17,7 +17,7 @@ your archive and default live station:
 2. Set `TEMPEST_DEVICE_ID` or start MCP with `--device-id` to select that device.
    The flag overrides the environment. MCP defaults to the first accessible
    Tempest device. CLI collection reuses an existing archive's device and
-   discovers a device for a new or empty archive.
+   discovers a device for a new archive or an empty archive without a saved device.
 3. Keep **one device per archive**. Give each device its own archive path when
    collecting from several stations; TempestKeep rejects writes for another device.
 
@@ -27,6 +27,11 @@ Conditions and forecasts remain station-level results. Pass `station_id` to
 default or the archive. See [device selection and capabilities](mcp.md#capabilities),
 [MCP configuration](mcp.md#build-and-connect), and the
 [searchable device view](mcp-apps.md#read-charts-and-tables).
+
+![Synthetic station devices filtered by name](screenshots/mcp-app-devices.png)
+
+*The Devices table keeps each device beside its parent station. This example
+uses synthetic stations in the local MCP Apps test host.*
 
 ## Explore weather in your conversation
 

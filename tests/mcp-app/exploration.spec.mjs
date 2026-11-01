@@ -40,6 +40,12 @@ test('daily forecasts summarize high low chance and days without inventing missi
     await window.fixtureHost.send(data);
   });
   await expect(app.locator('.metric-value')).toHaveText(['—', '—', '—', '1']);
+  await page.evaluate(async () => {
+    const data = structuredClone(window.fixtureHost.fixture.data);
+    data.daily = [{ date: '2026-06-01', high_f: 0, low_f: 0, precip_probability: 0 }];
+    await window.fixtureHost.send(data);
+  });
+  await expect(app.locator('.metric-value')).toHaveText(['0°F', '0°F', '0%', '1']);
   await app.getByRole('button', { name: 'hourly', exact: true }).click();
   await expect(app.locator('.metrics')).toContainText('Hourly outlook');
   expect(await page.evaluate(() => window.fixtureHost.calls)).toEqual([]);
@@ -67,11 +73,13 @@ test('SQL long cells can be searched and inspected with keyboard and hostile con
 test('long cell inspection and search stop at their disclosed limit', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const app = await open(page, 'table');
-  await page.evaluate(() => window.fixtureHost.send({ columns: ['value'], rows: [['a'.repeat(65536) + 'BEYOND_LIMIT']], row_count: 1 }));
+  const inspectable = 'a'.repeat(65526) + 'BOUNDARYOK';
+  await page.evaluate(value => window.fixtureHost.send({ columns: ['value'], rows: [[value + 'BEYOND_LIMIT']], row_count: 1 }), inspectable);
   await expect(app.locator('#data-panel')).toContainText('65,536');
+  await app.locator('#search').fill('BOUNDARYOK');
   await app.getByRole('button', { name: /Inspect full value/ }).click();
   const dialog = app.getByRole('dialog', { name: 'Cell value' });
-  await expect(dialog.locator('pre')).toHaveText('a'.repeat(65536));
+  await expect(dialog.locator('pre')).toHaveText(inspectable);
   await expect(dialog).toContainText('65,536');
   expect(await app.locator('html').evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.locator('iframe').screenshot({ path: test.info().outputPath('cell-inspector-narrow.png'), animations: 'disabled' });
