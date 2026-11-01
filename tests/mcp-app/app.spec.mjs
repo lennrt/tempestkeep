@@ -122,7 +122,13 @@ test('pointer selection uses plotted time gaps instead of evenly spaced indices'
   const points = [observations.points[0], observations.points[1], observations.points[10]];
   await page.evaluate(data => window.fixtureHost.send(data), { ...observations, points });
   await expect(app.locator('#chart-reading')).toHaveAttribute('max', '2');
-  const plot = await app.locator('.chart-hit').boundingBox();
+  // A queued resize can replace the SVG between the result assertion and
+  // geometry inspection. Wait for connected plot geometry before pointing.
+  let plot;
+  await expect.poll(async () => {
+    plot = await app.locator('.chart-hit').boundingBox();
+    return plot !== null;
+  }).toBe(true);
   // 70% of the time axis is nearest the final point. An index-based mapping
   // would select the middle row and hide the outage's actual spacing.
   await page.mouse.click(plot.x + plot.width * .7, plot.y + plot.height / 2);
