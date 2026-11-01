@@ -29,9 +29,16 @@ The fixed gap limit and threshold appear in the output. First and last gaps
 outside the stored observation range cannot be inferred.
 
 Independent review found that an externally modified metadata value could exceed
-the writer's existing 4,096-byte limit. Both metadata readers now enforce that
-same byte limit in SQL before creating a Go string. Null and NUL-containing
-values also return ErrInvalidArchive. Ordinary invalid completion markers still
-return ErrInvalidCheckpoint. Missing legacy metadata tables remain supported by
-Store.Meta. This is an intentional read-validation change without an API shape
+the writer's existing 4,096-byte limit. Both metadata readers now bound the SQL
+projection and enforce that same UTF-8 byte limit after conversion. SQLite BLOB
+casts measure the database encoding. The SQL bound is 8,192 encoded bytes so
+valid values in UTF-16 archives remain readable. The projected UTF-8 string
+contains at most 12,288 bytes. The reader rejects values over 4,096 UTF-8 bytes.
+Materialize one matching metadata value before checking its size. This keeps
+legacy views with nondeterministic expressions from changing the value between
+the guard and projection. The limit bounds Go strings returned by the driver;
+it does not bound SQLite's internal work to evaluate an external schema.
+Null and NUL-containing values also return ErrInvalidArchive. Ordinary invalid
+completion markers still return ErrInvalidCheckpoint. Store.Meta still supports
+missing legacy metadata tables. This is an intentional read-validation change without an API shape
 change, schema migration, or new limit.

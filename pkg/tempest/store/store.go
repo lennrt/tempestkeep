@@ -250,19 +250,23 @@ func (s *Store) Meta(ctx context.Context, key string) (string, bool, error) {
 	return v, found, archiveFailure("read archive metadata", err)
 }
 
-// readMetadata applies the same byte and NUL rules as SetMeta, including to
-// values written by other applications. The SQL projects an oversized value as
-// NULL so its bytes never become a Go string.
+// readMetadata applies the same UTF-8 byte and NUL rules as SetMeta, including
+// to values written by other applications. SQLite measures BLOB casts in the
+// database encoding. A valid value needs at most twice the UTF-8 limit in UTF-16,
+// so SQL bounds the encoded projection at that size before Go allocation. UTF-16
+// conversion expands by at most 3/2, bounding the Go string at three times the
+// limit; the final length check enforces the original UTF-8 byte limit.
+// Materialization keeps a legacy view's guard and projection on the same value.
 func readMetadata(ctx context.Context, db *sql.DB, key string) (string, bool, error) {
 	var value sql.NullString
 	var size sql.NullInt64
-	if err := db.QueryRowContext(ctx, qryMetaGet, MaxMetadataValueBytes, key).Scan(&value, &size); err != nil {
+	if err := db.QueryRowContext(ctx, qryMetaGet, key, 2*MaxMetadataValueBytes).Scan(&value, &size); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", false, nil
 		}
 		return "", false, err
 	}
-	if !value.Valid || !size.Valid || size.Int64 > MaxMetadataValueBytes || strings.IndexByte(value.String, 0) >= 0 {
+	if !value.Valid || !size.Valid || size.Int64 > 2*MaxMetadataValueBytes || len(value.String) > MaxMetadataValueBytes || strings.IndexByte(value.String, 0) >= 0 {
 		return "", false, fmt.Errorf("%w: metadata value exceeds %d bytes, contains NUL, or is null", ErrInvalidArchive, MaxMetadataValueBytes)
 	}
 	return value.String, true, nil

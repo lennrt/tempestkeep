@@ -39,16 +39,33 @@ It MUST state that stored observations do not establish continuous coverage.
 
 ### Requirement: Bounded stored metadata reads
 
-Metadata readers MUST enforce the writer's existing byte and NUL limits before
-returning values. Oversized values MUST be excluded by SQL before Go allocation.
-Malformed stored values MUST retain ErrInvalidArchive classification.
+Metadata readers MUST enforce the writer's existing UTF-8 byte and NUL limits
+before returning values. SQL MUST exclude values over 8,192 encoded bytes before
+Go allocation. After UTF-8 conversion, readers MUST reject values over 4,096
+bytes. Malformed stored values MUST retain ErrInvalidArchive classification.
+The size guard and projection MUST use one evaluation of one matching value.
+This bounds the Go string, not SQLite's internal schema-evaluation memory.
 
 #### Scenario: An external application stores oversized metadata
 
 - **WHEN** either archive metadata reader encounters more than 4,096 bytes
-- **THEN** it returns ErrInvalidArchive without loading those bytes as a Go string
+- **THEN** it returns ErrInvalidArchive, with any intermediate Go string bounded
+  to at most 12,288 bytes
 
 #### Scenario: A valid multibyte metadata value reaches the boundary
 
 - **WHEN** the value is exactly 4,096 bytes without NUL
 - **THEN** both metadata readers return the exact value
+
+#### Scenario: The archive uses UTF-16 encoding
+
+- **WHEN** a metadata value contains exactly 4,096 UTF-8 bytes in a UTF-16 archive
+- **THEN** both metadata readers return the exact value
+- **AND** values exceeding the UTF-8 byte limit return ErrInvalidArchive
+
+#### Scenario: A legacy view changes its value on each evaluation
+
+- **WHEN** a matching metadata view expression can return a different size
+  each time it is evaluated
+- **THEN** the reader evaluates that value once before guarding its projection
+- **AND** a value over the encoded limit does not enter a Go string
