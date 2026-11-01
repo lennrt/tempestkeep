@@ -240,15 +240,32 @@ func (s *Store) Meta(ctx context.Context, key string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	var v string
-	switch err := db.QueryRowContext(ctx, qryMetaGet, key).Scan(&v); {
-	case err == nil:
-		return v, true, nil
-	case errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "no such table"):
-		return "", false, nil
-	default:
-		return "", false, archiveFailure("read archive metadata", err)
+	v, found, err := readMetadata(ctx, db, key)
+	if errors.Is(err, ErrInvalidArchive) {
+		return v, found, err
 	}
+	if err != nil && strings.Contains(err.Error(), "no such table") {
+		return "", false, nil
+	}
+	return v, found, archiveFailure("read archive metadata", err)
+}
+
+// readMetadata applies the same byte and NUL rules as SetMeta, including to
+// values written by other applications. The SQL projects an oversized value as
+// NULL so its bytes never become a Go string.
+func readMetadata(ctx context.Context, db *sql.DB, key string) (string, bool, error) {
+	var value sql.NullString
+	var size sql.NullInt64
+	if err := db.QueryRowContext(ctx, qryMetaGet, MaxMetadataValueBytes, key).Scan(&value, &size); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	if !value.Valid || !size.Valid || size.Int64 > MaxMetadataValueBytes || strings.IndexByte(value.String, 0) >= 0 {
+		return "", false, fmt.Errorf("%w: metadata value exceeds %d bytes, contains NUL, or is null", ErrInvalidArchive, MaxMetadataValueBytes)
+	}
+	return value.String, true, nil
 }
 
 func validateMetadataKey(key string) error {
