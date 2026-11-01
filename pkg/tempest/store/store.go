@@ -549,13 +549,14 @@ func (s *Store) PressureTendency(ctx context.Context, windowSeconds int64) (*Pre
 
 // DayStat is one calendar day of aggregates, in US display units.
 type DayStat struct {
-	Day         string   `json:"day"` // YYYY-MM-DD, local time
-	TempMinF    *float64 `json:"temp_min_f,omitempty"`
-	TempMaxF    *float64 `json:"temp_max_f,omitempty"`
-	TempAvgF    *float64 `json:"temp_avg_f,omitempty"`
-	RainIn      float64  `json:"rain_in"`
-	PeakGustMph *float64 `json:"peak_gust_mph,omitempty"`
-	Obs         int64    `json:"obs"`
+	Day          string   `json:"day"` // YYYY-MM-DD, local time
+	TempMinF     *float64 `json:"temp_min_f,omitempty"`
+	TempMaxF     *float64 `json:"temp_max_f,omitempty"`
+	TempAvgF     *float64 `json:"temp_avg_f,omitempty"`
+	RainIn       *float64 `json:"rain_in"`
+	RainReadings int64    `json:"rain_readings"`
+	PeakGustMph  *float64 `json:"peak_gust_mph,omitempty"`
+	Obs          int64    `json:"obs"`
 }
 
 // dayAgg is one local calendar day of raw SI aggregates: the intermediate the
@@ -626,7 +627,7 @@ func (s *Store) dayAggregates(ctx context.Context, startEpoch, endEpoch int64) (
 
 // dayStat converts a raw SI day aggregate to display units.
 func dayStat(d dayAgg) DayStat {
-	ds := DayStat{Day: d.day.Format("2006-01-02"), RainIn: model.MmToInch(d.rainMm), Obs: d.obs}
+	ds := DayStat{Day: d.day.Format("2006-01-02"), RainIn: rainTotalIn(d.rainMm, d.rainN), RainReadings: d.rainN, Obs: d.obs}
 	if d.tempMin != nil {
 		v := model.CToF(*d.tempMin)
 		ds.TempMinF = &v
@@ -926,4 +927,13 @@ func (s *Store) Records(ctx context.Context) (Records, error) {
 // reports.
 func localTime(epoch int64) string {
 	return time.Unix(epoch, 0).Local().Format(time.RFC3339)
+}
+
+// rainTotalIn preserves missing rain while retaining available partial sums.
+func rainTotalIn(mm float64, readings int64) *float64 {
+	if readings == 0 {
+		return nil
+	}
+	v := model.MmToInch(mm)
+	return &v
 }

@@ -156,7 +156,7 @@ func fillArchiveRainToday(ctx context.Context, st *store.Store, d *dashboard, no
 		return nil
 	}
 	rain := days[len(days)-1].RainIn
-	d.rainTodayIn = &rain
+	d.rainTodayIn = rain
 	return nil
 }
 
